@@ -1,0 +1,141 @@
+{
+    "HDFC Bank": {
+      "aliases": [
+        "HDFC Bank",
+        "HDFC Bank Ltd",
+        "HDFC"
+      ],
+      "ticker": "HDFCBANK",
+      "sector": "Banking"
+    },
+    "ICICI Bank": {
+      "aliases": [
+        "ICICI Bank",
+        "ICICI"
+      ],
+      "ticker": "ICICIBANK",
+      "sector": "Banking"
+    },
+    "State Bank of India": {
+      "aliases": [
+        "State Bank of India",
+        "SBI",
+        "State Bank"
+      ],
+      "ticker": "SBIN",
+      "sector": "Banking"
+    },
+    "Reliance Industries": {
+      "aliases": [
+        "Reliance Industries",
+        "Reliance",
+        "RIL",
+        "Reliance Industries Ltd"
+      ],
+      "ticker": "RELIANCE",
+      "sector": "Energy"
+    },
+    "Tata Consultancy Services": {
+      "aliases": [
+        "Tata Consultancy Services",
+        "TCS"
+      ],
+      "ticker": "TCS",
+      "sector": "IT"
+    },
+    "Infosys": {
+      "aliases": [
+        "Infosys",
+        "Infy",
+        "Infosys Ltd"
+      ],
+      "ticker": "INFOSYS",
+      "sector": "IT"
+    },
+    "Adani Green Energy": {
+      "aliases": [
+        "Adani Green Energy",
+        "Adani Green"
+      ],
+      "ticker": "ADANIGREEN",
+      "sector": "Energy"
+    },
+    "Wipro": {
+      "aliases": [
+        "Wipro",
+        "Wipro Ltd"
+      ],
+      "ticker": "WIPRO",
+      "sector": "IT"
+    },
+    "Mahindra & Mahindra": {
+      "aliases": [
+        "Mahindra",
+        "Mahindra & Mahindra",
+        "Mahindra and Mahindra",
+        "M&M"
+      ],
+      "ticker": "MAHINDRA",
+      "sector": "Auto"
+    },
+    "Bharti Airtel": {
+      "aliases": [
+        "Bharti Airtel",
+        "Airtel",
+        "Bharti"
+      ],
+      "ticker": "BHARTIARTL",
+      "sector": "Telecom"
+    },
+    "Sun Pharmaceutical Industries": {
+      "aliases": [
+        "Sun Pharmaceutical Industries",
+        "Sun Pharma",
+        "Sun Pharmaceutical"
+      ],
+      "ticker": "SUNPHARMA",
+      "sector": "Pharma"
+    },
+    "Maruti Suzuki India": {
+      "aliases": [
+        "Maruti Suzuki India",
+        "Maruti Suzuki",
+        "Maruti"
+      ],
+      "ticker": "MARUTI",
+      "sector": "Auto"
+    },
+    "Power Grid Corporation": {
+      "aliases": [
+        "Power Grid Corporation",
+        "Power Grid",
+        "PGCIL"
+      ],
+      "ticker": "POWERGRID",
+      "sector": "Utilities"
+    },
+    "UltraTech Cement": {
+      "aliases": [
+        "UltraTech Cement",
+        "UltraTech"
+      ],
+      "ticker": "ULTRATECH",
+      "sector": "Cement"
+    },
+    "Tata Motors": {
+      "aliases": [
+        "Tata Motors",
+        "TaMo"
+      ],
+      "ticker": "TATAMOTORS",
+      "sector": "Auto"
+    },
+    "Tech Mahindra": {
+      "aliases": [
+        "Tech Mahindra",
+        "TechM"
+      ],
+      "ticker": "TECHM",
+      "sector": "IT"
+    }
+  }

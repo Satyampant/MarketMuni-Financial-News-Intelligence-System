@@ -1,0 +1,54 @@
+{
+    "RBI": [
+      "rbi",
+      "reserve bank of india",
+      "reserve bank",
+      "monetary policy committee",
+      "mpc",
+      "shaktikanta das"
+    ],
+    "SEBI": [
+      "sebi",
+      "securities and exchange board of india",
+      "securities & exchange board of india",
+      "market regulator"
+    ],
+    "IRDAI": [
+      "irdai",
+      "irda",
+      "insurance regulatory and development authority",
+      "insurance regulatory and development authority of india",
+      "insurance regulator"
+    ],
+    "CCI": [
+      "cci",
+      "competition commission of india",
+      "competition commission",
+      "competition regulator"
+    ],
+    "PFRDA": [
+      "pfrda",
+      "pension fund regulatory and development authority"
+    ],
+    "IBBI": [
+      "ibbi",
+      "insolvency and bankruptcy board of india"
+    ],
+    "US FDA": [
+      "us fda",
+      "fda",
+      "food and drug administration"
+    ],
+    "Federal Reserve": [
+      "federal reserve",
+      "the fed",
+      "fomc",
+      "federal open market committee",
+      "jerome powell"
+    ],
+    "US SEC": [
+      "sec",
+      "securities and exchange commission",
+      "us sec"
+    ]
+  }

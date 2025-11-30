@@ -1,0 +1,35 @@
+{
+    "Banking": [
+      "HDFCBANK",
+      "ICICIBANK",
+      "SBIN"
+    ],
+    "IT": [
+      "TCS",
+      "INFOSYS",
+      "WIPRO",
+      "TECHM"
+    ],
+    "Energy": [
+      "RELIANCE",
+      "ADANIGREEN"
+    ],
+    "Auto": [
+      "MAHINDRA",
+      "MARUTI",
+      "TATAMOTORS"
+    ],
+    "Telecom": [
+      "BHARTIARTL"
+    ],
+    "Pharma": [
+      "SUNPHARMA"
+    ],
+    "Cement": [
+      "ULTRATECH"
+    ],
+    "Utilities": [
+      "POWERGRID"
+    ]
+  }
+  
