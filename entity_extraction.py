@@ -1,10 +1,9 @@
-# entity_extraction.py
 from __future__ import annotations
 from pathlib import Path
 import json
 import re
 from typing import Dict, List, Union, Optional
-from news_storage import NewsArticle  # existing file in repo. :contentReference[oaicite:5]{index=5}
+from news_storage import NewsArticle  
 
 try:
     import spacy
@@ -175,7 +174,7 @@ class EntityExtractor:
                 events.add(kw)
 
         return {
-            "Companies": sorted(final_companies),  # <--- FIXED: Returning clean set
+            "Companies": sorted(final_companies),  
             "Sectors": sorted(sectors),
             "Regulators": sorted(regulators),
             "People": sorted(people),

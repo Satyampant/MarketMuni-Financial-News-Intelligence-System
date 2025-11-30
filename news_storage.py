@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Optional
+from typing import Optional, List, Dict, Any
 import json
 
 @dataclass
@@ -11,10 +11,23 @@ class NewsArticle:
     source: str
     timestamp: datetime
     raw_text: str = field(default="")
+    impacted_stocks: List[dict] = field(default_factory=list)
     
     def __post_init__(self):
         if isinstance(self.timestamp, str):
             self.timestamp = datetime.fromisoformat(self.timestamp)
+
+
+@dataclass
+class StockImpact:
+    symbol: str
+    confidence: float
+    impact_type: str  # "direct" | "sector" | "regulatory"
+    source_entity: Optional[str] = None
+    rule: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
 
 class NewsStorage:
     def __init__(self):

@@ -1,0 +1,8 @@
+{
+    "RBI": ["Banking", "Finance"],
+    "SEBI": ["Banking", "Finance", "IT", "Auto", "Energy"],
+    "IRDAI": ["Insurance"], 
+    "US FDA": ["Pharma"],
+    "DOT": ["Telecom"],
+    "TRAI": ["Telecom"]
+}
