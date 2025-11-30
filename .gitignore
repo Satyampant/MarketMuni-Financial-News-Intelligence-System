@@ -2,3 +2,5 @@
 __pycache__
 uv.lock
 requirements.txt
+
+chroma_db/

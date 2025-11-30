@@ -1,7 +1,7 @@
 from sentence_transformers import SentenceTransformer, CrossEncoder
 from sklearn.metrics.pairwise import cosine_similarity
 from news_storage import NewsArticle
-from typing import List
+from typing import List, Optional
 import numpy as np
 
 class DeduplicationAgent:
@@ -17,6 +17,9 @@ class DeduplicationAgent:
             text = f"{article.title}. {article.content}"
             self.embeddings_cache[article.id] = self.embedding_model.encode(text)
         return self.embeddings_cache[article.id]
+    
+    def get_cached_embedding(self, article_id: str) -> Optional[np.ndarray]:
+        return self.embeddings_cache.get(article_id)
     
     def find_duplicates(self, article: NewsArticle, existing_articles: List[NewsArticle]) -> List[str]:
         if not existing_articles: return []
