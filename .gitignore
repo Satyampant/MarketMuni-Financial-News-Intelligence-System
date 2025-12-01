@@ -4,3 +4,4 @@ uv.lock
 requirements.txt
 
 chroma_db/
+.env
