@@ -128,36 +128,36 @@ class EntityExtractor:
                         companies.add(canon)
                         break
 
-        # --- 3. CLEANUP: Set Difference (Improved) ---
+        # --- 3. CLEANUP: Set Difference ---
         final_companies = set()
         
         for co in companies:
-            # Normalize for comparison: lower case, strip whitespace
             norm_co = co.lower().strip()
-            
-            # Remove "the " prefix if it exists (common in spaCy ORG entities)
             if norm_co.startswith("the "):
                 norm_co = norm_co[4:].strip()
 
-            # Check 1: Is this explicitly a known regulator alias?
-            # (e.g. checks "reserve bank of india" against regulator map)
             if norm_co in self.regulator_map:
                 continue
-                
-            # Check 2: Does it map to a Canonical Regulator we already found?
-            # If map["reserve bank of india"] -> "RBI", and we found "RBI" in Step 1
+            
             canonical_reg = self.regulator_map.get(norm_co)
             if canonical_reg and canonical_reg in regulators:
                 continue
 
-            # Check 3: Is the Company Name exactly the same as a found Regulator?
-            # (e.g. If spaCy extracted "RBI" as ORG)
             if co in regulators:
                 continue
 
             final_companies.add(co)
 
-        # 4) Sector detection
+        # --- NEW STEP: Infer Sectors from Companies ---
+        # If we found "HDFC Bank", we know it belongs to "Banking"
+        for company in final_companies:
+            meta = self.alias_table.get(company)
+            if meta and isinstance(meta, dict):
+                sector = meta.get("sector")
+                if sector:
+                    sectors.add(sector)
+
+        # 4) Explicit Sector detection (Keyword matching)
         tokens = re.findall(r"\b\w+\b", text)
         token_set = set(tokens)
         for sector in self.sector_tickers.keys():

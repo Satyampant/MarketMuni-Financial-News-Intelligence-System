@@ -19,9 +19,6 @@ class VectorStore:
         self.persist_directory = Path(persist_directory)
         self.persist_directory.mkdir(exist_ok=True)
         
-        # Initialize embedding model (reuse from deduplication)
-        self.embedding_model = SentenceTransformer(embedding_model)
-        
         # Initialize ChromaDB client with persistence
         self.client = chromadb.PersistentClient(path=str(self.persist_directory))
         
