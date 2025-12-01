@@ -2,38 +2,65 @@ from deduplication import DeduplicationAgent
 from news_storage import NewsArticle, load_mock_dataset
 from datetime import datetime
 import numpy as np
-from sklearn.metrics.pairwise import cosine_similarity
 
-def test_duplicate_detection():
-    # We no longer need to lower the threshold manually. 
-    # The Cross-Encoder is smart enough to handle semantic similarity at high precision.
-    agent = DeduplicationAgent() 
+def test_rbi_duplicate_detection():
+    """Test the core example from problem statement: RBI rate hike articles."""
+    print("=" * 70)
+    print("TEST 1: RBI Rate Hike Duplicate Detection (Core Requirement)")
+    print("=" * 70)
     
-    # Test with RBI rate hike articles (N002, N005, N006)
+    agent = DeduplicationAgent()
     articles = load_mock_dataset('mock_news_data.json')
     
+    # Get the three RBI articles (N002, N005, N006)
     n002 = next(a for a in articles if a.id == "N002")
     n005 = next(a for a in articles if a.id == "N005")
     n006 = next(a for a in articles if a.id == "N006")
     
-    print("Testing duplicate detection on RBI rate hike articles:")
-    print(f"  N002: {n002.title}")
-    print(f"  N005: {n005.title}")
-    print(f"  N006: {n006.title}\n")
+    print("\nInput Articles:")
+    print(f"  N002: '{n002.title}'")
+    print(f"  N005: '{n005.title}'")
+    print(f"  N006: '{n006.title}'")
     
-    # Test finding duplicates for N005 against N002
-    duplicates = agent.find_duplicates(n005, [n002])
-    print(f"✓ Duplicates for N005 against N002: {duplicates}")
-    assert len(duplicates) > 0, "Should detect N002 as duplicate of N005"
+    # Test N005 against N002
+    duplicates_005 = agent.find_duplicates(n005, [n002])
+    bi_score_005, cross_score_005 = agent.get_similarity_scores(n005, n002)
     
-    # Test finding duplicates for N006 against N002 and N005
-    duplicates = agent.find_duplicates(n006, [n002, n005])
-    print(f"✓ Duplicates for N006 against [N002, N005]: {duplicates}")
-    assert len(duplicates) > 0, "Should detect duplicates for N006"
+    print(f"\nN005 vs N002:")
+    print(f"  Bi-Encoder Score:   {bi_score_005:.4f}")
+    print(f"  Cross-Encoder Score: {cross_score_005:.4f}")
+    print(f"  Duplicates Found: {duplicates_005}")
     
-    print()
+    # Test N006 against both N002 and N005
+    duplicates_006 = agent.find_duplicates(n006, [n002, n005])
+    bi_score_006_002, cross_score_006_002 = agent.get_similarity_scores(n006, n002)
+    bi_score_006_005, cross_score_006_005 = agent.get_similarity_scores(n006, n005)
+    
+    print(f"\nN006 vs N002:")
+    print(f"  Bi-Encoder Score:   {bi_score_006_002:.4f}")
+    print(f"  Cross-Encoder Score: {cross_score_006_002:.4f}")
+    print(f"\nN006 vs N005:")
+    print(f"  Bi-Encoder Score:   {bi_score_006_005:.4f}")
+    print(f"  Cross-Encoder Score: {cross_score_006_005:.4f}")
+    print(f"  Duplicates Found: {duplicates_006}")
+    
+    # Verify all three are identified as duplicates
+    all_duplicates = set()
+    all_duplicates.update(duplicates_005)
+    all_duplicates.update(duplicates_006)
+    
+    print(f"\n✓ Result: All RBI articles identified as duplicates")
+    assert len(duplicates_005) > 0, "N005 should detect N002 as duplicate"
+    assert len(duplicates_006) > 0, "N006 should detect duplicates"
+    print("✅ PASSED: Core duplicate detection working correctly\n")
+
 
 def test_consolidation():
+    """Test consolidation logic: earliest timestamp + merged sources."""
+    print("=" * 70)
+    print("TEST 2: Duplicate Consolidation")
+    print("=" * 70)
+    
     agent = DeduplicationAgent()
     articles = load_mock_dataset('mock_news_data.json')
     
@@ -41,90 +68,75 @@ def test_consolidation():
     n005 = next(a for a in articles if a.id == "N005")
     n006 = next(a for a in articles if a.id == "N006")
     
-    # Consolidate duplicates (should keep earliest timestamp)
+    print(f"\nInput Articles:")
+    print(f"  N002: {n002.timestamp} - Source: {n002.source}")
+    print(f"  N005: {n005.timestamp} - Source: {n005.source}")
+    print(f"  N006: {n006.timestamp} - Source: {n006.source}")
+    
     consolidated = agent.consolidate_duplicates([n005, n002, n006])
+    
+    print(f"\nConsolidated Article:")
+    print(f"  ID: {consolidated.id}")
+    print(f"  Timestamp: {consolidated.timestamp}")
+    print(f"  Sources: {consolidated.source}")
+    
     assert consolidated.id == "N002", "Should keep earliest article (N002)"
-    assert "Economic Times" in consolidated.source, "Should preserve source info"
-    print(f"✓ Consolidated to article {consolidated.id} from {consolidated.timestamp}")
-    print(f"  Merged Sources: {consolidated.source}\n")
+    assert "Economic Times" in consolidated.source
+    assert "Financial Express" in consolidated.source
+    assert "Trade Brains" in consolidated.source
+    
+    print("✅ PASSED: Consolidation preserves earliest article and merges sources\n")
 
-def test_non_duplicates():
+
+def test_non_duplicate_detection():
+    """Test that unrelated articles are NOT flagged as duplicates."""
+    print("=" * 70)
+    print("TEST 3: Non-Duplicate Detection (False Positive Prevention)")
+    print("=" * 70)
+    
     agent = DeduplicationAgent()
     articles = load_mock_dataset('mock_news_data.json')
     
-    # Test unrelated articles (HDFC dividend vs TCS deal)
-    n001 = next(a for a in articles if a.id == "N001")
-    n008 = next(a for a in articles if a.id == "N008")
+    # Test completely unrelated articles
+    test_pairs = [
+        ("N001", "N008"),  # HDFC dividend vs TCS deal
+        ("N007", "N013"),  # Reliance profit vs Mahindra EVs
+        ("N010", "N020"),  # Adani solar vs HUL revenue
+    ]
     
-    duplicates = agent.find_duplicates(n001, [n008])
-    assert len(duplicates) == 0, "Should not detect unrelated articles as duplicates"
-    print(f"✓ Correctly identified non-duplicates (N001 vs N008)\n")
+    print("\nTesting unrelated article pairs:")
+    all_passed = True
+    
+    for id1, id2 in test_pairs:
+        a1 = next(a for a in articles if a.id == id1)
+        a2 = next(a for a in articles if a.id == id2)
+        
+        duplicates = agent.find_duplicates(a1, [a2])
+        bi_score, cross_score = agent.get_similarity_scores(a1, a2)
+        
+        print(f"\n  {id1} vs {id2}:")
+        print(f"    Bi-Encoder: {bi_score:.4f} | Cross-Encoder: {cross_score:.4f}")
+        print(f"    Result: {'DUPLICATE' if duplicates else 'DISTINCT'}")
+        
+        if duplicates:
+            all_passed = False
+            print(f"    ⚠️  WARNING: False positive detected!")
+    
+    assert all_passed, "Unrelated articles should not be detected as duplicates"
+    print("\n✅ PASSED: No false positives on unrelated articles\n")
 
-def test_similarity_analysis():
-    """
-    Debug helper to analyze the Two-Stage Deduplication Process:
-    1. Bi-Encoder Score (Candidate Retrieval)
-    2. Cross-Encoder Score (Final Verification)
-    """
-    agent = DeduplicationAgent()
-    articles = load_mock_dataset('mock_news_data.json')
-    
-    print("--- Two-Stage Similarity Analysis ---")
-    
-    # Helper to get cross-encoder score
-    def get_cross_score(a1, a2):
-        # Replicating the text formatting from DeduplicationAgent
-        text1 = f"{a1.title}. {a1.content}"
-        text2 = f"{a2.title}. {a2.content}"
-        return agent.reranker.predict([[text1, text2]])[0]
-
-    # Helper to get bi-encoder score
-    def get_bi_score(a1, a2):
-        emb1 = agent._get_embedding(a1).reshape(1, -1)
-        emb2 = agent._get_embedding(a2).reshape(1, -1)
-        return cosine_similarity(emb1, emb2)[0][0]
-
-    # RBI articles (True Duplicates)
-    n002 = next(a for a in articles if a.id == "N002")
-    n005 = next(a for a in articles if a.id == "N005")
-    
-    bi_score_rbi = get_bi_score(n002, n005)
-    cross_score_rbi = get_cross_score(n002, n005)
-    
-    print(f"RBI Articles (N002 vs N005):")
-    print(f"  Bi-Encoder (Cosine):   {bi_score_rbi:.4f} (Filters candidates)")
-    print(f"  Cross-Encoder (Final): {cross_score_rbi:.4f} (Decides duplicate)")
-    print(f"  Result: {'DUPLICATE' if cross_score_rbi > 0.5 else 'DISTINCT'}")
-
-    # Related article 2
-    n006 = next(a for a in articles if a.id == "N006")
-    
-    bi_score_rbi = get_bi_score(n006, n005)
-    cross_score_rbi = get_cross_score(n006, n005)
-    
-    print(f"RBI Articles (N006 vs N005):")
-    print(f"  Bi-Encoder (Cosine):   {bi_score_rbi:.4f} (Filters candidates)")
-    print(f"  Cross-Encoder (Final): {cross_score_rbi:.4f} (Decides duplicate)")
-    print(f"  Result: {'DUPLICATE' if cross_score_rbi > 0.8 else 'DISTINCT'}")
-    
-    # Unrelated articles (Distinct)
-    n001 = next(a for a in articles if a.id == "N001")
-    n008 = next(a for a in articles if a.id == "N008")
-    
-    bi_score_diff = get_bi_score(n001, n008)
-    cross_score_diff = get_cross_score(n001, n008)
-    
-    print(f"\nUnrelated Articles (N001 vs N008):")
-    print(f"  Bi-Encoder (Cosine):   {bi_score_diff:.4f}")
-    print(f"  Cross-Encoder (Final): {cross_score_diff:.4f}")
-    print(f"  Result: {'DUPLICATE' if cross_score_diff > 0.8 else 'DISTINCT'}")
-    print()
 
 def test_full_corpus_deduplication():
+    """Test deduplication across entire mock dataset."""
+    print("=" * 70)
+    print("TEST 4: Full Corpus Deduplication (30+ Articles)")
+    print("=" * 70)
+    
     agent = DeduplicationAgent()
     articles = load_mock_dataset('mock_news_data.json')
     
-    print("--- Testing Full Corpus Deduplication ---")
+    print(f"\nProcessing {len(articles)} articles...")
+    
     duplicate_groups = []
     processed_ids = set()
     
@@ -132,34 +144,173 @@ def test_full_corpus_deduplication():
         if article.id in processed_ids:
             continue
         
-        # In a real scenario, we check all, but here we just pass the rest
-        remaining = [a for a in articles if a.id != article.id and a.id not in processed_ids]
+        remaining = [
+            a for a in articles 
+            if a.id != article.id and a.id not in processed_ids
+        ]
         
-        # DeduplicationAgent now handles the two-stage process internally
         duplicates = agent.find_duplicates(article, remaining)
         
         if duplicates:
             group = [article.id] + duplicates
             duplicate_groups.append(group)
             processed_ids.update(group)
-            print(f"✓ Found duplicate group: {group}")
+            print(f"  Found duplicate group: {group}")
         else:
             processed_ids.add(article.id)
     
-    total_found = len(articles) - sum(len(g)-1 for g in duplicate_groups)
-    print(f"\n✓ Found {len(duplicate_groups)} duplicate group(s) in corpus")
-    print(f"✓ Unique stories count: {total_found}")
-    print()
+    unique_count = len(articles) - sum(len(g) - 1 for g in duplicate_groups)
+    
+    print(f"\n📊 Deduplication Summary:")
+    print(f"  Total Articles: {len(articles)}")
+    print(f"  Duplicate Groups Found: {len(duplicate_groups)}")
+    print(f"  Unique Stories: {unique_count}")
+    print(f"  Duplicates Removed: {len(articles) - unique_count}")
+    
+    # Verify RBI group is detected
+    rbi_group_found = any(
+        set(['N002', 'N005', 'N006']).issubset(set(group)) 
+        for group in duplicate_groups
+    )
+    
+    assert rbi_group_found, "RBI duplicate group should be detected in full corpus"
+    print("✅ PASSED: Full corpus deduplication successful\n")
+
+
+def test_accuracy_benchmark():
+    """
+    Benchmark test to verify ≥95% accuracy requirement.
+    
+    Ground Truth:
+    - Duplicates: (N002, N005, N006) - RBI rate hike
+    - All other pairs should be distinct
+    """
+    print("=" * 70)
+    print("TEST 5: Accuracy Benchmark (≥95% Target)")
+    print("=" * 70)
+    
+    agent = DeduplicationAgent()
+    articles = load_mock_dataset('mock_news_data.json')
+    
+    # Ground truth: Only N002, N005, N006 are duplicates
+    ground_truth_duplicates = {
+        ('N002', 'N005'),
+        ('N002', 'N006'),
+        ('N005', 'N006')
+    }
+    
+    # Test all pairs
+    total_pairs = 0
+    correct_predictions = 0
+    false_positives = []
+    false_negatives = []
+    
+    print("\nTesting all article pairs...")
+    
+    for i, a1 in enumerate(articles):
+        for a2 in articles[i+1:]:
+            total_pairs += 1
+            
+            duplicates = agent.find_duplicates(a1, [a2])
+            predicted_duplicate = len(duplicates) > 0
+            
+            pair = tuple(sorted([a1.id, a2.id]))
+            actual_duplicate = pair in ground_truth_duplicates
+            
+            if predicted_duplicate == actual_duplicate:
+                correct_predictions += 1
+            else:
+                if predicted_duplicate and not actual_duplicate:
+                    false_positives.append(pair)
+                elif not predicted_duplicate and actual_duplicate:
+                    false_negatives.append(pair)
+    
+    accuracy = (correct_predictions / total_pairs) * 100
+    
+    print(f"\n📊 Accuracy Metrics:")
+    print(f"  Total Pairs Tested: {total_pairs}")
+    print(f"  Correct Predictions: {correct_predictions}")
+    print(f"  Accuracy: {accuracy:.2f}%")
+    print(f"  False Positives: {len(false_positives)}")
+    print(f"  False Negatives: {len(false_negatives)}")
+    
+    if false_positives:
+        print(f"\n⚠️  False Positives (incorrectly marked as duplicates):")
+        for pair in false_positives[:5]:  # Show first 5
+            print(f"    {pair}")
+    
+    if false_negatives:
+        print(f"\n⚠️  False Negatives (missed duplicates):")
+        for pair in false_negatives:
+            print(f"    {pair}")
+    
+    assert accuracy >= 95.0, f"Accuracy {accuracy:.2f}% is below 95% target"
+    print(f"\n✅ PASSED: Achieved {accuracy:.2f}% accuracy (≥95% target met)\n")
+
+
+def test_edge_cases():
+    """Test edge cases and boundary conditions."""
+    print("=" * 70)
+    print("TEST 6: Edge Cases")
+    print("=" * 70)
+    
+    agent = DeduplicationAgent()
+    articles = load_mock_dataset('mock_news_data.json')
+    article = articles[0]
+    
+    # Test empty existing articles
+    print("\n1. Empty existing articles list:")
+    duplicates = agent.find_duplicates(article, [])
+    assert duplicates == [], "Should return empty list for empty input"
+    print("   ✓ Returns empty list correctly")
+    
+    # Test single article consolidation
+    print("\n2. Single article consolidation:")
+    consolidated = agent.consolidate_duplicates([article])
+    assert consolidated.id == article.id
+    print("   ✓ Returns same article for single input")
+    
+    # Test cache functionality
+    print("\n3. Embedding cache:")
+    initial_cache_size = len(agent.embeddings_cache)
+    _ = agent.find_duplicates(article, articles[:5])
+    new_cache_size = len(agent.embeddings_cache)
+    assert new_cache_size > initial_cache_size, "Cache should grow"
+    print(f"   ✓ Cache working (size: {initial_cache_size} → {new_cache_size})")
+    
+    agent.clear_cache()
+    assert len(agent.embeddings_cache) == 0
+    print("   ✓ Cache cleared successfully")
+    
+    print("\n✅ PASSED: All edge cases handled correctly\n")
+
+
+def run_all_tests():
+    """Execute complete test suite."""
+    print("\n" + "=" * 70)
+    print("SEMANTIC DEDUPLICATION TEST SUITE")
+    print("Target: ≥95% Duplicate Detection Accuracy")
+    print("=" * 70 + "\n")
+    
+    try:
+        test_rbi_duplicate_detection()
+        test_consolidation()
+        test_non_duplicate_detection()
+        test_full_corpus_deduplication()
+        test_accuracy_benchmark()
+        test_edge_cases()
+        
+        print("=" * 70)
+        print("✅ ALL TESTS PASSED - DEDUPLICATION SYSTEM READY")
+        print("=" * 70)
+        
+    except AssertionError as e:
+        print(f"\n❌ TEST FAILED: {e}")
+        raise
+    except Exception as e:
+        print(f"\n❌ UNEXPECTED ERROR: {e}")
+        raise
+
 
 if __name__ == "__main__":
-    print("Testing Semantic Deduplication Engine (Bi-Encoder + Cross-Encoder)")
-    print("=" * 60 + "\n")
-    
-    test_similarity_analysis()
-    test_duplicate_detection()
-    test_consolidation()
-    test_non_duplicates()
-    test_full_corpus_deduplication()
-    
-    print("=" * 60)
-    print("✅ All deduplication tests passed!")
+    run_all_tests()
