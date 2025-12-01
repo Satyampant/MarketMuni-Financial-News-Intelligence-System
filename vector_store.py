@@ -53,9 +53,9 @@ class VectorStore:
             "entities": json.dumps(getattr(article, "entities", {})),
             "impacted_stocks": json.dumps([
                 {
-                    "symbol": stock.symbol,
-                    "confidence": stock.confidence,
-                    "impact_type": stock.impact_type
+                    "symbol": stock["symbol"],
+                    "confidence": stock["confidence"],
+                    "impact_type": stock["impact_type"]
                 }
                 for stock in article.impacted_stocks
             ])

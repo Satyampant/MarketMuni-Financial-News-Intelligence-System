@@ -4,21 +4,6 @@ from typing import Optional, List, Dict, Any
 import json
 
 @dataclass
-class NewsArticle:
-    id: str
-    title: str
-    content: str
-    source: str
-    timestamp: datetime
-    raw_text: str = field(default="")
-    impacted_stocks: List[dict] = field(default_factory=list)
-    
-    def __post_init__(self):
-        if isinstance(self.timestamp, str):
-            self.timestamp = datetime.fromisoformat(self.timestamp)
-
-
-@dataclass
 class StockImpact:
     symbol: str
     confidence: float
@@ -28,6 +13,21 @@ class StockImpact:
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
+
+@dataclass
+class NewsArticle:
+    id: str
+    title: str
+    content: str
+    source: str
+    timestamp: datetime
+    raw_text: str = field(default="")
+    impacted_stocks: List[Dict] = field(default_factory=list)
+    
+    def __post_init__(self):
+        if isinstance(self.timestamp, str):
+            self.timestamp = datetime.fromisoformat(self.timestamp)
+
 
 
 class NewsStorage:
