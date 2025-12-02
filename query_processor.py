@@ -23,7 +23,7 @@ class QueryStrategy(Enum):
 
 @dataclass
 class QueryContext:
-    """Expanded query context with entities and strategies"""
+    """Expanded query context with entities, strategies, and sentiment filter"""
     original_query: str
     expanded_terms: List[str]
     companies: List[str]
@@ -31,9 +31,9 @@ class QueryContext:
     regulators: List[str]
     stock_symbols: List[str]
     strategies: List[QueryStrategy]
-    # Multi-query approach: separate queries for different strategies
     primary_query: str
     context_queries: List[str]
+    sentiment_filter: Optional[str] = None  # "Bullish" | "Bearish" | "Neutral"
 
 
 class QueryProcessor:
@@ -74,13 +74,18 @@ class QueryProcessor:
                         self.sector_to_companies[sector] = []
                     self.sector_to_companies[sector].append(company)
     
-    def expand_query(self, query: str) -> QueryContext:
+    def expand_query(
+        self, 
+        query: str, 
+        sentiment_filter: Optional[str] = None
+    ) -> QueryContext:
         """
         Expand query with related entities and create multiple focused queries.
         
         Multi-Query Approach:
         - Primary Query: The original user query (preserves semantic meaning)
         - Context Queries: Additional targeted searches based on detected strategies
+        - Sentiment Filter: Optional filter for bullish/bearish/neutral articles
         """
         # Extract entities from query
         entities = self.entity_extractor.extract_entities(query)
@@ -157,7 +162,8 @@ class QueryProcessor:
             stock_symbols=list(set(stock_symbols)),
             strategies=strategies,
             primary_query=primary_query,
-            context_queries=list(set(context_queries))
+            context_queries=list(set(context_queries)),
+            sentiment_filter=sentiment_filter
         )
     
     def _determine_strategies(
@@ -221,24 +227,26 @@ class QueryProcessor:
         sentiment_filter: Optional[str] = None,
     ) -> List[NewsArticle]:
         """
-        Process query using multi-query retrieval strategy.
+        Process query using multi-query retrieval strategy with sentiment filtering.
         
         Multi-Query Retrieval:
         1. Primary Search: Search with original query (high precision)
         2. Context Searches: Additional targeted searches based on strategies
         3. Merge & Deduplicate: Combine results, remove duplicates
-        4. Filter & Rank: Apply entity filtering and re-rank
+        4. Sentiment Filtering: Filter by bullish/bearish/neutral if specified
+        5. Filter & Rank: Apply entity filtering and re-rank with sentiment boost
         
         Args:
             query_text: Natural language query
             top_k: Maximum number of results
             min_similarity: Minimum similarity threshold
+            sentiment_filter: Optional "Bullish", "Bearish", or "Neutral" filter
             
         Returns:
             List of NewsArticle objects ranked by relevance
         """
         # Step 1: Expand query and determine strategies
-        context = self.expand_query(query_text)
+        context = self.expand_query(query_text, sentiment_filter)
         
         # Step 2: Multi-Query Retrieval
         all_results = {}  # article_id -> result dict (for deduplication)
@@ -247,7 +255,7 @@ class QueryProcessor:
         primary_results = self.vector_store.search(
             context.primary_query,
             top_k=top_k * 2,
-            sentiment_filter=sentiment_filter  # Get more for primary
+            sentiment_filter=sentiment_filter  # Apply sentiment filter in vector search
         )
         
         for result in primary_results:
@@ -260,7 +268,7 @@ class QueryProcessor:
             context_results = self.vector_store.search(
                 context_query,
                 top_k=top_k,
-                sentiment_filter=sentiment_filter
+                sentiment_filter=sentiment_filter  # Apply sentiment filter
             )
             
             for result in context_results:
@@ -278,7 +286,7 @@ class QueryProcessor:
         merged_results = list(all_results.values())
         filtered_results = self._apply_filters(merged_results, context)
         
-        # Step 4: Re-rank results
+        # Step 4: Re-rank results with sentiment boosting
         ranked_results = self._rerank_results(filtered_results, context)
         
         # Step 5: Filter by minimum similarity
@@ -376,13 +384,14 @@ class QueryProcessor:
         context: QueryContext
     ) -> List[Dict[str, Any]]:
         """
-        Re-rank results with improved scoring.
+        Re-rank results with improved scoring and sentiment boosting.
         
         Scoring Strategy:
         - Primary query results get a boost
         - Direct matches get highest weight
         - Regulator matches get high precision weight
         - Sector/thematic use balanced weights
+        - High signal_strength articles get sentiment boost (up to 1.5x)
         """
         for result in results:
             semantic_score = result["similarity"]
@@ -416,7 +425,22 @@ class QueryProcessor:
             # Apply primary boost
             final_score *= primary_boost
             
+            # SENTIMENT BOOST: Prioritize high-signal articles
+            sentiment_boost = 1.0
+            metadata = result["metadata"]
+            
+            if "sentiment_signal_strength" in metadata:
+                signal_strength = float(metadata.get("sentiment_signal_strength", 0.0))
+                
+                # Boost articles with high signal strength (0-100 scale)
+                # Max boost: 1.5x for signal_strength = 100
+                sentiment_boost = 1.0 + (signal_strength / 200.0)
+            
+            # Apply sentiment boost
+            final_score *= sentiment_boost
+            
             result["final_score"] = min(final_score, 1.0)  # Cap at 1.0
+            result["sentiment_boost"] = sentiment_boost
         
         # Sort by final score
         ranked = sorted(results, key=lambda x: x["final_score"], reverse=True)
@@ -440,6 +464,11 @@ class QueryProcessor:
             if isinstance(impacted_stocks, str):
                 impacted_stocks = json.loads(impacted_stocks)
             
+            # Parse sentiment
+            sentiment = metadata.get("sentiment")
+            if isinstance(sentiment, str):
+                sentiment = json.loads(sentiment) if sentiment != "null" else None
+            
             # Create NewsArticle
             article = NewsArticle(
                 id=metadata["article_id"],
@@ -453,23 +482,25 @@ class QueryProcessor:
             # Add enriched data
             article.entities = entities
             article.impacted_stocks = impacted_stocks
+            article.sentiment = sentiment
             
             # Add score metadata
             article.relevance_score = result.get("final_score", result["similarity"])
             article.query_source = result.get("query_source", "unknown")
+            article.sentiment_boost = result.get("sentiment_boost", 1.0)
             
             articles.append(article)
         
         return articles
     
-    def explain_query(self, query_text: str) -> Dict[str, Any]:
+    def explain_query(self, query_text: str, sentiment_filter: Optional[str] = None) -> Dict[str, Any]:
         """
         Explain how a query will be processed (for debugging).
         
         Returns:
             Dictionary with query expansion and strategy information
         """
-        context = self.expand_query(query_text)
+        context = self.expand_query(query_text, sentiment_filter)
         
         return {
             "original_query": context.original_query,
@@ -482,5 +513,6 @@ class QueryProcessor:
                 "sectors": context.sectors,
                 "regulators": context.regulators,
                 "stock_symbols": context.stock_symbols
-            }
+            },
+            "sentiment_filter": context.sentiment_filter
         }

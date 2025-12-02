@@ -20,7 +20,7 @@ class NewsIntelligenceState(TypedDict):
     duplicates: Annotated[List[str], operator.add]
     entities: Optional[dict]
     impacted_stocks: Optional[List[dict]]
-    sentiment: Optional[dict]  # NEW: Sentiment analysis results
+    sentiment: Optional[dict]
     query_text: Optional[str]
     sentiment_filter: Optional[str]
     query_results: Annotated[List[NewsArticle], operator.add]
@@ -46,7 +46,7 @@ class NewsIntelligenceGraph:
         self.entity_extractor = entity_extractor or EntityExtractor()
         self.stock_mapper = stock_mapper or StockImpactMapper()
         
-        # NEW: Initialize Sentiment Agent
+        # Initialize Sentiment Agent
         self.sentiment_agent = sentiment_agent or HybridSentimentClassifier(
             method=sentiment_method,
             entity_extractor=self.entity_extractor
@@ -72,7 +72,7 @@ class NewsIntelligenceGraph:
         graph_builder.add_node("deduplication", self._deduplication_agent)
         graph_builder.add_node("entity_extraction", self._entity_extraction_agent)
         graph_builder.add_node("impact_mapper", self._impact_mapper_agent)
-        graph_builder.add_node("sentiment_analysis", self._sentiment_analysis_agent)  # NEW
+        graph_builder.add_node("sentiment_analysis", self._sentiment_analysis_agent)
         graph_builder.add_node("indexing", self._indexing_agent)
         
         # Define pipeline flow with sentiment analysis
@@ -80,8 +80,8 @@ class NewsIntelligenceGraph:
         graph_builder.add_edge("ingestion", "deduplication")
         graph_builder.add_edge("deduplication", "entity_extraction")
         graph_builder.add_edge("entity_extraction", "impact_mapper")
-        graph_builder.add_edge("impact_mapper", "sentiment_analysis")  # NEW
-        graph_builder.add_edge("sentiment_analysis", "indexing")  # NEW
+        graph_builder.add_edge("impact_mapper", "sentiment_analysis")
+        graph_builder.add_edge("sentiment_analysis", "indexing")
         graph_builder.add_edge("indexing", END)
         
         return graph_builder.compile()
@@ -198,7 +198,7 @@ class NewsIntelligenceGraph:
         """
         Agent 5: Sentiment Analysis - Analyzes article sentiment
         
-        NEW AGENT: Performs sentiment classification using hybrid approach
+        Performs sentiment classification using hybrid approach
         Attaches sentiment data to article for downstream processing
         """
         article = state["current_article"]
@@ -250,21 +250,32 @@ class NewsIntelligenceGraph:
         }
     
     def _query_agent(self, state: NewsIntelligenceState) -> dict:
-        """Agent 7: Query Processing - Retrieves relevant articles"""
+        """Agent 7: Query Processing - Retrieves relevant articles with sentiment filtering"""
         query_text = state.get("query_text")
         sentiment_filter = state.get("sentiment_filter")
 
         if not query_text:
             return {"error": "No query text provided"}
         
-        # Process query
-        results = self.query_processor.process_query(query_text, top_k=10, sentiment_filter=sentiment_filter)
+        # Validate sentiment filter if provided
+        if sentiment_filter:
+            valid_sentiments = ["Bullish", "Bearish", "Neutral"]
+            if sentiment_filter not in valid_sentiments:
+                return {"error": f"Invalid sentiment filter: {sentiment_filter}. Must be one of {valid_sentiments}"}
+        
+        # Process query with sentiment filter
+        results = self.query_processor.process_query(
+            query_text, 
+            top_k=10, 
+            sentiment_filter=sentiment_filter
+        )
         
         stats = {
             "query_time": datetime.now().isoformat(),
             "results_count": len(results),
             "query": query_text,
-            "sentiment_filter": sentiment_filter
+            "sentiment_filter": sentiment_filter,
+            "sentiment_filter_applied": sentiment_filter is not None
         }
         
         return {
@@ -291,8 +302,9 @@ class NewsIntelligenceGraph:
             "duplicates": [],
             "entities": None,
             "impacted_stocks": None,
-            "sentiment": None,  # NEW
+            "sentiment": None,
             "query_text": None,
+            "sentiment_filter": None,
             "query_results": [],
             "error": None,
             "stats": {}
@@ -304,7 +316,16 @@ class NewsIntelligenceGraph:
         return final_state
     
     def run_query(self, query_text: str, sentiment_filter: Optional[str] = None) -> dict:
-        """Execute query pipeline"""
+        """
+        Execute query pipeline with optional sentiment filtering
+        
+        Args:
+            query_text: Natural language query
+            sentiment_filter: Optional "Bullish", "Bearish", or "Neutral" filter
+            
+        Returns:
+            Dictionary with query results and stats
+        """
         initial_state = {
             "articles": [],
             "current_article": None,
