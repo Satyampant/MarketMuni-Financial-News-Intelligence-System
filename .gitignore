@@ -5,3 +5,6 @@ requirements.txt
 
 chroma_db/
 .env
+
+test_chroma_sentiment/
+test_chroma_sentiment_search/

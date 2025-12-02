@@ -20,7 +20,7 @@ class SentimentData:
     classification: str  # "Bullish" | "Bearish" | "Neutral"
     confidence_score: float  # 0-100 scale
     signal_strength: float  # 0-100 scale
-    sentiment_breakdown: Dict[str, float]  # Granular scores (0-100)
+    sentiment_breakdown: Dict[str, Any]  #  type hint Any to allow metadata strings
     analysis_method: str  # "rule_based" | "ml_classifier" | "hybrid"
     timestamp: Optional[str] = None  # ISO format timestamp
     
@@ -40,10 +40,11 @@ class SentimentData:
         
         # Validate sentiment_breakdown scores
         for key, value in self.sentiment_breakdown.items():
-            if not 0 <= value <= 100:
-                raise ValueError(
-                    f"sentiment_breakdown[{key}] must be 0-100, got {value}"
-                )
+            if isinstance(value, (int, float)):
+                if not 0 <= value <= 100:
+                    raise ValueError(
+                        f"sentiment_breakdown[{key}] must be 0-100, got {value}"
+                    )
         
         # Set timestamp if not provided
         if self.timestamp is None:
