@@ -256,7 +256,7 @@ async def query_articles(
             )
         
         # Run query through LangGraph
-        result = news_graph.run_query(q)
+        result = news_graph.run_query(q, sentiment_filter=filter_by_sentiment)
         
         # Check for errors
         if result.get("error"):
@@ -265,16 +265,6 @@ async def query_articles(
         # Extract results
         articles = result.get("query_results", [])
         stats = result.get("stats", {})
-        
-        # Apply sentiment filter if specified
-        if filter_by_sentiment:
-            filtered_articles = []
-            for article in articles:
-                if article.has_sentiment():
-                    sentiment_data = article.get_sentiment()
-                    if sentiment_data.classification == filter_by_sentiment:
-                        filtered_articles.append(article)
-            articles = filtered_articles
         
         # Limit to top_k
         articles = articles[:top_k]

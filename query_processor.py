@@ -217,7 +217,8 @@ class QueryProcessor:
         self,
         query_text: str,
         top_k: int = 10,
-        min_similarity: float = 0.3
+        min_similarity: float = 0.3,
+        sentiment_filter: Optional[str] = None,
     ) -> List[NewsArticle]:
         """
         Process query using multi-query retrieval strategy.
@@ -245,7 +246,8 @@ class QueryProcessor:
         # 2a. Primary search (original query - highest quality)
         primary_results = self.vector_store.search(
             context.primary_query,
-            top_k=top_k * 2  # Get more for primary
+            top_k=top_k * 2,
+            sentiment_filter=sentiment_filter  # Get more for primary
         )
         
         for result in primary_results:
@@ -257,7 +259,8 @@ class QueryProcessor:
         for context_query in context.context_queries[:3]:  # Limit to top 3 context queries
             context_results = self.vector_store.search(
                 context_query,
-                top_k=top_k
+                top_k=top_k,
+                sentiment_filter=sentiment_filter
             )
             
             for result in context_results:

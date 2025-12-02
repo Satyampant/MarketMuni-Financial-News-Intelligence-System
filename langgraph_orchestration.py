@@ -22,6 +22,7 @@ class NewsIntelligenceState(TypedDict):
     impacted_stocks: Optional[List[dict]]
     sentiment: Optional[dict]  # NEW: Sentiment analysis results
     query_text: Optional[str]
+    sentiment_filter: Optional[str]
     query_results: Annotated[List[NewsArticle], operator.add]
     error: Optional[str]
     stats: dict
@@ -251,17 +252,19 @@ class NewsIntelligenceGraph:
     def _query_agent(self, state: NewsIntelligenceState) -> dict:
         """Agent 7: Query Processing - Retrieves relevant articles"""
         query_text = state.get("query_text")
-        
+        sentiment_filter = state.get("sentiment_filter")
+
         if not query_text:
             return {"error": "No query text provided"}
         
         # Process query
-        results = self.query_processor.process_query(query_text, top_k=10)
+        results = self.query_processor.process_query(query_text, top_k=10, sentiment_filter=sentiment_filter)
         
         stats = {
             "query_time": datetime.now().isoformat(),
             "results_count": len(results),
-            "query": query_text
+            "query": query_text,
+            "sentiment_filter": sentiment_filter
         }
         
         return {
@@ -300,7 +303,7 @@ class NewsIntelligenceGraph:
         
         return final_state
     
-    def run_query(self, query_text: str) -> dict:
+    def run_query(self, query_text: str, sentiment_filter: Optional[str] = None) -> dict:
         """Execute query pipeline"""
         initial_state = {
             "articles": [],
@@ -310,6 +313,7 @@ class NewsIntelligenceGraph:
             "impacted_stocks": None,
             "sentiment": None,
             "query_text": query_text,
+            "sentiment_filter": sentiment_filter,
             "query_results": [],
             "error": None,
             "stats": {}
