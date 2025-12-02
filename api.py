@@ -32,6 +32,7 @@ class ArticleOutput(BaseModel):
     entities: Optional[Dict[str, List[str]]] = None
     impacted_stocks: Optional[List[Dict[str, Any]]] = None
     relevance_score: Optional[float] = None
+    sentiment: Optional[Dict[str, Any]] = None  # NEW: Sentiment data
 
 
 class IngestResponse(BaseModel):
@@ -43,6 +44,9 @@ class IngestResponse(BaseModel):
     duplicates_found: int
     entities_extracted: Dict[str, int]
     stocks_impacted: int
+    sentiment_classification: Optional[str] = None  # NEW
+    sentiment_confidence: Optional[float] = None  # NEW
+    signal_strength: Optional[float] = None  # NEW
     stats: Dict[str, Any]
 
 
@@ -59,13 +63,26 @@ class StatsResponse(BaseModel):
     total_articles_stored: int
     vector_store_count: int
     dedup_threshold: Dict[str, float]
+    sentiment_analysis: Dict[str, Any]  # NEW: Sentiment statistics
     status: str
+
+
+class SentimentDetailResponse(BaseModel):
+    """Response model for detailed sentiment breakdown"""
+    article_id: str
+    title: str
+    classification: str
+    confidence_score: float
+    signal_strength: float
+    sentiment_breakdown: Dict[str, Any]
+    analysis_method: str
+    timestamp: str
 
 
 # Initialize FastAPI app
 app = FastAPI(
     title="Financial News Intelligence API",
-    description="Multi-agent AI system for processing and querying financial news",
+    description="Multi-agent AI system for processing and querying financial news with sentiment analysis",
     version="1.0.0"
 )
 
@@ -79,13 +96,14 @@ dedup_agent = DeduplicationAgent()
 entity_extractor = EntityExtractor()
 stock_mapper = StockImpactMapper()
 
-# Initialize LangGraph orchestration
+# Initialize LangGraph orchestration with sentiment analysis
 news_graph = NewsIntelligenceGraph(
     storage=storage,
     vector_store=vector_store,
     dedup_agent=dedup_agent,
     entity_extractor=entity_extractor,
-    stock_mapper=stock_mapper
+    stock_mapper=stock_mapper,
+    sentiment_method="hybrid"  # Use hybrid sentiment analysis by default
 )
 
 
@@ -98,6 +116,8 @@ async def root():
         "endpoints": {
             "POST /ingest": "Ingest a new article",
             "GET /query": "Query articles by text",
+            "GET /article/{article_id}": "Get article by ID",
+            "GET /article/{article_id}/sentiment": "Get detailed sentiment analysis",
             "GET /stats": "Get system statistics",
             "GET /health": "Health check"
         }
@@ -127,13 +147,14 @@ async def ingest_article(article_input: ArticleInput):
     2. Deduplication Agent: Checks for duplicates
     3. Entity Extraction Agent: Extracts companies, sectors, regulators
     4. Impact Mapper Agent: Maps to affected stocks
-    5. Indexing Agent: Stores in database and vector store
+    5. Sentiment Analysis Agent: Analyzes article sentiment
+    6. Indexing Agent: Stores in database and vector store
     
     Args:
         article_input: Article data to ingest
         
     Returns:
-        IngestResponse with processing results and statistics
+        IngestResponse with processing results and sentiment analysis
     """
     try:
         # Convert input to NewsArticle
@@ -158,6 +179,11 @@ async def ingest_article(article_input: ArticleInput):
         entities_stats = stats.get("entities_extracted", {})
         impact_breakdown = stats.get("impact_breakdown", {})
         
+        # Extract sentiment data
+        sentiment_classification = stats.get("sentiment_classification")
+        sentiment_confidence = stats.get("sentiment_confidence")
+        signal_strength = stats.get("sentiment_signal_strength")
+        
         return IngestResponse(
             success=True,
             article_id=article.id,
@@ -166,11 +192,16 @@ async def ingest_article(article_input: ArticleInput):
             duplicates_found=stats.get("duplicates_found", 0),
             entities_extracted=entities_stats,
             stocks_impacted=stats.get("stocks_impacted", 0),
+            sentiment_classification=sentiment_classification,
+            sentiment_confidence=sentiment_confidence,
+            signal_strength=signal_strength,
             stats={
                 "ingestion_time": stats.get("ingestion_time"),
                 "impact_breakdown": impact_breakdown,
                 "total_articles": stats.get("total_articles"),
-                "indexed": stats.get("indexed", False)
+                "indexed": stats.get("indexed", False),
+                "sentiment_analyzed": stats.get("sentiment_analyzed", False),
+                "sentiment_method": stats.get("sentiment_method")
             }
         )
         
@@ -181,7 +212,11 @@ async def ingest_article(article_input: ArticleInput):
 @app.get("/query", response_model=QueryResponse, tags=["Query"])
 async def query_articles(
     q: str = Query(..., description="Natural language query text"),
-    top_k: int = Query(10, ge=1, le=50, description="Maximum number of results")
+    top_k: int = Query(10, ge=1, le=50, description="Maximum number of results"),
+    filter_by_sentiment: Optional[str] = Query(
+        None, 
+        description="Filter by sentiment: Bullish, Bearish, or Neutral"
+    )
 ):
     """
     Query articles using natural language with context-aware retrieval.
@@ -191,16 +226,19 @@ async def query_articles(
     - Sector queries: Returns all related news across companies
     - Regulator queries: Returns regulator-specific articles
     - Thematic queries: Uses semantic matching
+    - Sentiment filtering: Optional filter by Bullish/Bearish/Neutral
     
     Examples:
     - "HDFC Bank news" → Direct mentions + Banking sector news
     - "Banking sector update" → All banking-related articles
     - "RBI policy changes" → RBI-specific regulatory news
     - "Interest rate impact" → Semantic theme matching
+    - "HDFC Bank news?filter_by_sentiment=Bullish" → Only bullish HDFC news
     
     Args:
         q: Natural language query
         top_k: Maximum number of results to return
+        filter_by_sentiment: Optional sentiment filter (Bullish/Bearish/Neutral)
         
     Returns:
         QueryResponse with matching articles and query statistics
@@ -208,6 +246,14 @@ async def query_articles(
     try:
         if not q or len(q.strip()) == 0:
             raise HTTPException(status_code=400, detail="Query cannot be empty")
+        
+        # Validate sentiment filter if provided
+        valid_sentiments = ["Bullish", "Bearish", "Neutral"]
+        if filter_by_sentiment and filter_by_sentiment not in valid_sentiments:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Invalid sentiment filter. Must be one of: {', '.join(valid_sentiments)}"
+            )
         
         # Run query through LangGraph
         result = news_graph.run_query(q)
@@ -217,12 +263,30 @@ async def query_articles(
             raise HTTPException(status_code=400, detail=result["error"])
         
         # Extract results
-        articles = result.get("query_results", [])[:top_k]
+        articles = result.get("query_results", [])
         stats = result.get("stats", {})
+        
+        # Apply sentiment filter if specified
+        if filter_by_sentiment:
+            filtered_articles = []
+            for article in articles:
+                if article.has_sentiment():
+                    sentiment_data = article.get_sentiment()
+                    if sentiment_data.classification == filter_by_sentiment:
+                        filtered_articles.append(article)
+            articles = filtered_articles
+        
+        # Limit to top_k
+        articles = articles[:top_k]
         
         # Convert to output format
         article_outputs = []
         for article in articles:
+            # Extract sentiment data if available
+            sentiment_dict = None
+            if article.has_sentiment():
+                sentiment_dict = article.sentiment
+            
             article_outputs.append(ArticleOutput(
                 id=article.id,
                 title=article.title,
@@ -231,8 +295,14 @@ async def query_articles(
                 timestamp=article.timestamp.isoformat(),
                 entities=getattr(article, "entities", None),
                 impacted_stocks=getattr(article, "impacted_stocks", None),
-                relevance_score=getattr(article, "relevance_score", None)
+                relevance_score=getattr(article, "relevance_score", None),
+                sentiment=sentiment_dict
             ))
+        
+        # Update stats with filter info
+        if filter_by_sentiment:
+            stats["sentiment_filter_applied"] = filter_by_sentiment
+            stats["results_after_filter"] = len(article_outputs)
         
         return QueryResponse(
             query=q,
@@ -250,10 +320,10 @@ async def query_articles(
 @app.get("/stats", response_model=StatsResponse, tags=["Statistics"])
 async def get_stats():
     """
-    Get system statistics including article counts and deduplication metrics.
+    Get system statistics including article counts, deduplication metrics, and sentiment analysis stats.
     
     Returns:
-        StatsResponse with system statistics
+        StatsResponse with system statistics and sentiment distribution
     """
     try:
         stats = news_graph.get_stats()
@@ -262,6 +332,7 @@ async def get_stats():
             total_articles_stored=stats["total_articles_stored"],
             vector_store_count=stats["vector_store_count"],
             dedup_threshold=stats["dedup_threshold"],
+            sentiment_analysis=stats["sentiment_analysis"],
             status=stats["status"]
         )
         
@@ -278,13 +349,18 @@ async def get_article(article_id: str):
         article_id: Unique article identifier
         
     Returns:
-        Article data with entities and stock impacts
+        Article data with entities, stock impacts, and sentiment analysis
     """
     try:
         article = storage.get_by_id(article_id)
         
         if not article:
             raise HTTPException(status_code=404, detail=f"Article {article_id} not found")
+        
+        # Extract sentiment data if available
+        sentiment_dict = None
+        if article.has_sentiment():
+            sentiment_dict = article.sentiment
         
         return ArticleOutput(
             id=article.id,
@@ -293,13 +369,64 @@ async def get_article(article_id: str):
             source=article.source,
             timestamp=article.timestamp.isoformat(),
             entities=getattr(article, "entities", None),
-            impacted_stocks=getattr(article, "impacted_stocks", None)
+            impacted_stocks=getattr(article, "impacted_stocks", None),
+            sentiment=sentiment_dict
         )
         
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Retrieval error: {str(e)}")
+
+
+@app.get("/article/{article_id}/sentiment", response_model=SentimentDetailResponse, tags=["Sentiment"])
+async def get_article_sentiment(article_id: str):
+    """
+    Get detailed sentiment analysis for a specific article.
+    
+    Returns comprehensive sentiment breakdown including:
+    - Classification (Bullish/Bearish/Neutral)
+    - Confidence score (0-100)
+    - Signal strength (0-100)
+    - Detailed sentiment breakdown with component scores
+    - Analysis method used (rule_based, finbert, or hybrid)
+    - Agreement score (for hybrid method)
+    
+    Args:
+        article_id: Unique article identifier
+        
+    Returns:
+        SentimentDetailResponse with detailed sentiment analysis
+    """
+    try:
+        article = storage.get_by_id(article_id)
+        
+        if not article:
+            raise HTTPException(status_code=404, detail=f"Article {article_id} not found")
+        
+        if not article.has_sentiment():
+            raise HTTPException(
+                status_code=404, 
+                detail=f"Article {article_id} does not have sentiment analysis data"
+            )
+        
+        sentiment_data = article.get_sentiment()
+        
+        return SentimentDetailResponse(
+            article_id=article.id,
+            title=article.title,
+            classification=sentiment_data.classification,
+            confidence_score=sentiment_data.confidence_score,
+            signal_strength=sentiment_data.signal_strength,
+            sentiment_breakdown=sentiment_data.sentiment_breakdown,
+            analysis_method=sentiment_data.analysis_method,
+            timestamp=sentiment_data.timestamp
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Sentiment retrieval error: {str(e)}")
 
 
 @app.delete("/reset", tags=["Admin"])
