@@ -246,7 +246,12 @@ class EntityExtractor:
                 rf"\b{re.escape(sector)}\b",
                 rf"\b{re.escape(sector.lower())} sector\b",
             ]
-            
+            # This ensures "Semiconductors" key matches "semiconductor" in text
+            if sector.endswith('s'):
+                singular = sector[:-1]
+                patterns.append(rf"\b{re.escape(singular)}\b")
+                patterns.append(rf"\b{re.escape(singular.lower())} sector\b")
+
             for pattern in patterns:
                 if re.search(pattern, text, flags=re.IGNORECASE):
                     sectors.add(sector)

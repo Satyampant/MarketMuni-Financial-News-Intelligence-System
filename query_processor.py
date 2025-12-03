@@ -469,6 +469,15 @@ class QueryProcessor:
             if isinstance(sentiment, str):
                 sentiment = json.loads(sentiment) if sentiment != "null" else None
             
+
+            cross_impacts = metadata.get("cross_impacts", [])
+            if isinstance(cross_impacts, str):
+                # Fallback in case it wasn't parsed
+                try:
+                    cross_impacts = json.loads(cross_impacts)
+                except json.JSONDecodeError:
+                    cross_impacts = []
+                    
             # Create NewsArticle
             article = NewsArticle(
                 id=metadata["article_id"],
@@ -483,6 +492,7 @@ class QueryProcessor:
             article.entities = entities
             article.impacted_stocks = impacted_stocks
             article.sentiment = sentiment
+            article.cross_impacts = cross_impacts
             
             # Add score metadata
             article.relevance_score = result.get("final_score", result["similarity"])
