@@ -388,36 +388,3 @@ class EntityExtractor:
                 "Events": sorted(events),
             }
 
-
-# Example usage and testing
-if __name__ == "__main__":
-    extractor = EntityExtractor()
-    
-    # Test cases from problem statement
-    test_cases = [
-        "RBI raises repo rate by 25 basis points to combat inflation",
-        "HDFC Bank announces 15% dividend, board approves stock buyback",
-        "Banking sector NPAs decline to 5-year low, credit growth at 16%",
-        "Reserve Bank hikes interest rates by 0.25% in surprise move",
-        "ICICI Bank opens 500 new branches across Tier-2 cities",
-    ]
-    
-    print("=" * 80)
-    print("Entity Extraction Tests")
-    print("=" * 80)
-    
-    for i, text in enumerate(test_cases, 1):
-        print(f"\n[Test {i}] {text}")
-        entities = extractor.extract_entities(text)
-        
-        for entity_type, values in entities.items():
-            if values:
-                print(f"  {entity_type}: {values}")
-        
-        # Test with confidence scores
-        entities_conf = extractor.extract_entities(text, return_confidence=True)
-        print("\n  With Confidence:")
-        for entity_type, conf_list in entities_conf.items():
-            if conf_list:
-                for ec in conf_list:
-                    print(f"    {ec.entity} ({ec.confidence:.2f}, {ec.source})")
