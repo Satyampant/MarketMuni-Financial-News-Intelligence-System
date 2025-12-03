@@ -9,6 +9,7 @@ from vector_store import VectorStore
 from deduplication import DeduplicationAgent
 from entity_extraction import EntityExtractor
 from stock_impact import StockImpactMapper
+from supply_chain_mapper import SupplyChainImpactMapper
 
 
 # Pydantic models for API
@@ -95,6 +96,7 @@ vector_store = VectorStore(
 dedup_agent = DeduplicationAgent()
 entity_extractor = EntityExtractor()
 stock_mapper = StockImpactMapper()
+supply_chain_mapper = SupplyChainImpactMapper()
 
 # Initialize LangGraph orchestration with sentiment analysis
 news_graph = NewsIntelligenceGraph(
@@ -103,6 +105,7 @@ news_graph = NewsIntelligenceGraph(
     dedup_agent=dedup_agent,
     entity_extractor=entity_extractor,
     stock_mapper=stock_mapper,
+    supply_chain_mapper=supply_chain_mapper,
     sentiment_method="hybrid"  # Use hybrid sentiment analysis by default
 )
 
