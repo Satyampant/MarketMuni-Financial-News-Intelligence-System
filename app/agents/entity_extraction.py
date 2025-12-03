@@ -1,10 +1,11 @@
 from __future__ import annotations
+from app.core.config import Paths
 from pathlib import Path
 import json
 import re
 from typing import Dict, List, Union, Optional, Set, Tuple
 from dataclasses import dataclass, asdict
-from news_storage import NewsArticle
+from app.core.models import NewsArticle
 
 try:
     import spacy
@@ -13,12 +14,9 @@ try:
 except Exception:
     SPACY_AVAILABLE = False
 
-MODULE_DIR = Path(__file__).parent
-
 
 @dataclass
 class EntityConfidence:
-    """Track entity extraction with confidence scores"""
     entity: str
     entity_type: str
     confidence: float
@@ -34,23 +32,22 @@ class EntityExtractor:
         model_name: str = "en_core_web_sm",
         event_keywords: Optional[List[str]] = None,
     ):
-        # Portable defaults (module-relative)
-        alias_path = Path(alias_path) if alias_path else MODULE_DIR / "company_aliases.json"
-        sector_path = Path(sector_path) if sector_path else MODULE_DIR / "sector_tickers.json"
-        regulator_path = Path(regulator_path) if regulator_path else MODULE_DIR / "regulators.json"
+        alias_path = Path(alias_path) if alias_path else Paths.COMPANY_ALIASES
+        sector_path = Path(sector_path) if sector_path else Paths.SECTOR_TICKERS
+        regulator_path = Path(regulator_path) if regulator_path else Paths.REGULATORS
 
-        # Load company aliases
+        # Loading company aliases
         self.alias_table = {}
         if alias_path.exists():
             self.alias_table = json.loads(alias_path.read_text())
         
-        # Build reverse lookup: alias -> canonical name
+        # Building reverse lookup: alias -> canonical name
         self.alias_to_canonical = {}
         for canonical, meta in self.alias_table.items():
             for alias in meta.get("aliases", [canonical]):
                 self.alias_to_canonical[alias.lower()] = canonical
 
-        # Load sector tickers
+        # Loading sector tickers
         self.sector_tickers = {}
         if sector_path.exists():
             self.sector_tickers = json.loads(sector_path.read_text())
@@ -69,7 +66,13 @@ class EntityExtractor:
         self.event_keywords = [k.lower() for k in (event_keywords or [
             "dividend", "buyback", "stock buyback", "merger", "acquisition", 
             "ipo", "rates", "repo rate", "interest rate", "policy rate",
-            "profit", "loss", "revenue", "earnings", "quarterly results"
+            "profit", "loss", "revenue", "earnings", "quarterly results",
+            "rights issue", "delisting", "bonus", "split", "consolidation", 
+            "restructuring", "capex", "guidance", "outlook", "forecast",
+            "default", "downgrade", "upgrade", "rating", "credit rating",
+            "stake sale", "divestment", "spin-off", "demerger", 
+            "capacity addition", "plant closure", "debt restructuring",
+            "working capital", "cash flow", "free cash flow"
         ])]
 
         # spaCy loading with graceful degradation
@@ -117,7 +120,6 @@ class EntityExtractor:
             if normalized.startswith(prefix):
                 normalized = normalized[len(prefix):]
         
-        # Check alias lookup
         canonical = self.alias_to_canonical.get(normalized.lower())
         if canonical:
             return canonical
@@ -147,7 +149,7 @@ class EntityExtractor:
         return regulators
 
     def _extract_companies_matcher(self, doc) -> Set[Tuple[str, float, str]]:
-        """Extract companies using PhraseMatcher (highest precision)"""
+        """Extracting companies using PhraseMatcher (highest precision)"""
         companies = set()
         
         if self.matcher is None:
@@ -200,8 +202,7 @@ class EntityExtractor:
         
         for canonical, meta in self.alias_table.items():
             for alias in meta.get("aliases", [canonical]):
-                # Strict word boundary matching
-                # Use \b for word boundaries to avoid partial matches
+                # Using \b for word boundaries to avoid partial matches
                 pattern = rf"\b{re.escape(alias)}\b"
                 if re.search(pattern, text, flags=re.IGNORECASE):
                     companies.add((canonical, 0.95, "regex"))
@@ -223,7 +224,6 @@ class EntityExtractor:
         return people
 
     def _infer_sectors_from_companies(self, companies: Set[str]) -> Set[str]:
-        """Infer sectors from identified companies"""
         sectors = set()
         
         for company in companies:
@@ -236,7 +236,6 @@ class EntityExtractor:
         return sectors
 
     def _extract_sectors_explicit(self, text: str) -> Set[str]:
-        """Detect explicit sector mentions"""
         sectors = set()
         
         # Create word boundary patterns for multi-word sectors
@@ -260,7 +259,6 @@ class EntityExtractor:
         return sectors
 
     def _extract_events(self, text: str) -> Set[str]:
-        """Extract event keywords with context"""
         events = set()
         lower_text = text.lower()
         
@@ -272,10 +270,7 @@ class EntityExtractor:
         
         return events
 
-    def _merge_entities_with_confidence(
-        self, 
-        entities_with_conf: Set[Tuple[str, float, str]]
-    ) -> List[str]:
+    def _merge_entities_with_confidence(self, entities_with_conf: Set[Tuple[str, float, str]]) -> List[str]:
         """Merge duplicate entities, keeping highest confidence version"""
         entity_map = {}
         
@@ -302,14 +297,12 @@ class EntityExtractor:
         """
         text = self._as_text(item)
         
-        # Initialize result containers
         companies_with_conf = set()
         regulators_with_conf = set()
         sectors = set()
         people = set()
         events = set()
 
-        # Extract regulators (always regex-based for reliability)
         regulators_with_conf = self._extract_regulators(text)
 
         # Extract companies using multiple methods
@@ -334,16 +327,14 @@ class EntityExtractor:
                 if company not in existing_company_names:
                     companies_with_conf.add((company, conf, source))
             
-            # Extract people
             people = self._extract_people(doc)
         else:
-            # Fallback: regex-based extraction
             companies_with_conf = self._extract_companies_regex(text)
 
         # Merge companies, removing duplicates and regulator conflicts
         companies_raw = self._merge_entities_with_confidence(companies_with_conf)
         
-        # Final cleanup: remove any companies that are actually regulators
+        # removing any companies that are actually regulators
         regulator_names = {reg for reg, _, _ in regulators_with_conf}
         companies = [c for c in companies_raw if c not in regulator_names]
 
@@ -384,7 +375,7 @@ class EntityExtractor:
                 ],
             }
         else:
-            # Return simple lists (backward compatible)
+            # Return simple lists 
             return {
                 "Companies": companies,
                 "Sectors": sorted(sectors),

@@ -5,15 +5,15 @@ Production-grade sentiment analysis with fallback mechanisms
 
 from typing import Dict, Any, Optional, Literal
 from dataclasses import dataclass
-from news_storage import NewsArticle, SentimentData
-from entity_extraction import EntityExtractor
+from app.core.models import NewsArticle, SentimentData
+from app.agents.entity_extraction import EntityExtractor
 
 # Import rule-based classifier
-from sentiment_classifier import RuleBasedSentimentClassifier
+from app.agents.sentiment.classifier import RuleBasedSentimentClassifier
 
 # Import FinBERT with graceful fallback
 try:
-    from sentiment_finbert import FinBERTSentimentClassifier, FINBERT_AVAILABLE
+    from app.agents.sentiment.finbert import FinBERTSentimentClassifier, FINBERT_AVAILABLE
 except ImportError:
     FINBERT_AVAILABLE = False
     FinBERTSentimentClassifier = None

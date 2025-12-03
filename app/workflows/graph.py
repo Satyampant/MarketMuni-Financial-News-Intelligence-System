@@ -4,14 +4,15 @@ from datetime import datetime
 
 from langgraph.graph import StateGraph, START, END
 
-from news_storage import NewsArticle, NewsStorage
-from deduplication import DeduplicationAgent
-from entity_extraction import EntityExtractor
-from stock_impact import StockImpactMapper
-from vector_store import VectorStore
-from query_processor import QueryProcessor
-from sentiment_hybrid import HybridSentimentClassifier
-from supply_chain_mapper import SupplyChainImpactMapper
+from app.core.models import NewsArticle
+from app.services.storage import NewsStorage
+from app.agents.deduplication import DeduplicationAgent
+from app.agents.entity_extraction import EntityExtractor
+from app.agents.stock_impact import StockImpactMapper
+from app.services.vector_store import VectorStore
+from app.agents.query_processor import QueryProcessor
+from app.agents.sentiment.hybrid import HybridSentimentClassifier
+from app.agents.supply_chain import SupplyChainImpactMapper
 
 
 class NewsIntelligenceState(TypedDict):

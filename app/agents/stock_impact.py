@@ -1,3 +1,4 @@
+from app.core.config import Paths
 from typing import List, Dict, Optional, Any
 from pathlib import Path
 from dataclasses import dataclass, asdict
@@ -5,9 +6,9 @@ import json
 import difflib
 
 # Import from storage to avoid circular dependency
-from news_storage import NewsArticle
+from app.core.models import NewsArticle
 
-MODULE_DIR = Path(__file__).parent
+# MODULE_DIR replaced by Paths config
 
 
 @dataclass
@@ -30,10 +31,10 @@ class StockImpactMapper:
         regulators_path: Optional[Path] = None,
         regulator_impact_path: Optional[Path] = None,
     ):
-        alias_path = alias_path or MODULE_DIR / "company_aliases.json"
-        sector_path = sector_path or MODULE_DIR / "sector_tickers.json"
-        regulators_path = regulators_path or MODULE_DIR / "regulators.json"
-        regulator_impact_path = regulator_impact_path or MODULE_DIR / "regulator_sector_impact.json"
+        alias_path = alias_path or Paths.COMPANY_ALIASES
+        sector_path = sector_path or Paths.SECTOR_TICKERS
+        regulators_path = regulators_path or Paths.REGULATORS
+        regulator_impact_path = regulator_impact_path or Paths.REGULATOR_IMPACT
 
         # 1. Load Company Aliases
         self.aliases = {}

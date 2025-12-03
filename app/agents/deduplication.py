@@ -1,6 +1,6 @@
 from sentence_transformers import SentenceTransformer, CrossEncoder
 from sklearn.metrics.pairwise import cosine_similarity
-from news_storage import NewsArticle
+from app.core.models import NewsArticle
 from typing import List, Optional, Tuple
 import numpy as np
 
@@ -24,7 +24,6 @@ class DeduplicationAgent:
         # STSB model outputs 0-1 similarity scores
         self.cross_encoder = CrossEncoder('cross-encoder/stsb-distilroberta-base')
         
-        # Thresholds tuned for ≥95% accuracy on duplicate detection
         self.bi_threshold = bi_encoder_threshold
         self.cross_threshold = cross_encoder_threshold
         
@@ -32,11 +31,9 @@ class DeduplicationAgent:
         self.embeddings_cache = {}
     
     def _prepare_text(self, article: NewsArticle) -> str:
-        """Combine title and content for embedding generation."""
         return f"{article.title}. {article.content}"
     
     def _get_embedding(self, article: NewsArticle) -> np.ndarray:
-        """Get or compute cached embedding for an article."""
         if article.id not in self.embeddings_cache:
             text = self._prepare_text(article)
             self.embeddings_cache[article.id] = self.embedding_model.encode(
@@ -47,28 +44,13 @@ class DeduplicationAgent:
         return self.embeddings_cache[article.id]
     
     def get_cached_embedding(self, article_id: str) -> Optional[np.ndarray]:
-        """Retrieve cached embedding if available."""
         return self.embeddings_cache.get(article_id)
     
     def clear_cache(self) -> None:
-        """Clear embedding cache to free memory."""
         self.embeddings_cache.clear()
     
-    def find_duplicates(
-        self, 
-        article: NewsArticle, 
-        existing_articles: List[NewsArticle]
-    ) -> List[str]:
-        """
-        Identify duplicate articles using two-stage semantic similarity.
+    def find_duplicates(self, article: NewsArticle, existing_articles: List[NewsArticle]) -> List[str]:
         
-        Args:
-            article: New article to check for duplicates
-            existing_articles: List of existing articles to compare against
-            
-        Returns:
-            List of article IDs that are duplicates of the input article
-        """
         if not existing_articles:
             return []
         
@@ -78,10 +60,8 @@ class DeduplicationAgent:
             self._get_embedding(a) for a in existing_articles
         ])
         
-        # Compute cosine similarities (vectorized operation)
         bi_scores = cosine_similarity(article_emb, existing_embs)[0]
         
-        # Filter candidates above bi-encoder threshold
         candidate_indices = np.where(bi_scores >= self.bi_threshold)[0]
         
         if len(candidate_indices) == 0:
@@ -97,7 +77,6 @@ class DeduplicationAgent:
             for cand in candidates
         ]
         
-        # Get high-precision similarity scores
         cross_scores = self.cross_encoder.predict(
             pairs,
             show_progress_bar=False,
@@ -112,26 +91,13 @@ class DeduplicationAgent:
         
         return duplicate_ids
     
-    def find_duplicates_batch(
-        self,
-        articles: List[NewsArticle],
-        existing_articles: List[NewsArticle]
-    ) -> dict[str, List[str]]:
-        """
-        Batch process multiple articles for duplicate detection.
-        
-        Returns:
-            Dictionary mapping article_id -> list of duplicate IDs
-        """
+    def find_duplicates_batch(self,articles: List[NewsArticle],existing_articles: List[NewsArticle]) -> dict[str, List[str]]:
         results = {}
         for article in articles:
             results[article.id] = self.find_duplicates(article, existing_articles)
         return results
     
-    def consolidate_duplicates(
-        self, 
-        articles: List[NewsArticle]
-    ) -> NewsArticle:
+    def consolidate_duplicates(self, articles: List[NewsArticle]) -> NewsArticle:
         """
         Merge duplicate articles into a single consolidated story.
         
@@ -152,7 +118,7 @@ class DeduplicationAgent:
         if len(articles) == 1:
             return articles[0]
         
-        # Sort by timestamp to get earliest article
+        # Sorting by timestamp to get earliest article
         sorted_articles = sorted(articles, key=lambda x: x.timestamp)
         primary = sorted_articles[0]
         
@@ -172,15 +138,8 @@ class DeduplicationAgent:
         
         return primary
     
-    def get_similarity_scores(
-        self,
-        article1: NewsArticle,
-        article2: NewsArticle
-    ) -> Tuple[float, float]:
+    def get_similarity_scores(self,article1: NewsArticle,article2: NewsArticle) -> Tuple[float, float]:
         """
-        Get both bi-encoder and cross-encoder similarity scores.
-        Useful for debugging and threshold tuning.
-        
         Returns:
             Tuple of (bi_encoder_score, cross_encoder_score)
         """

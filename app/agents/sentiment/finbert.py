@@ -1,8 +1,8 @@
 
 from typing import Dict, Any, Optional, Tuple
 from dataclasses import dataclass
-from news_storage import NewsArticle, SentimentData
-from entity_extraction import EntityExtractor
+from app.core.models import NewsArticle, SentimentData
+from app.agents.entity_extraction import EntityExtractor
 
 try:
     from transformers import AutoTokenizer, AutoModelForSequenceClassification

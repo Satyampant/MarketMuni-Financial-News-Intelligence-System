@@ -1,3 +1,4 @@
+from app.core.config import Paths
 """
 Supply Chain Impact Mapper
 Computes cross-sectoral impacts using supply chain relationships
@@ -8,9 +9,9 @@ from dataclasses import dataclass, asdict
 from pathlib import Path
 import json
 
-from news_storage import NewsArticle
+from app.core.models import NewsArticle
 
-MODULE_DIR = Path(__file__).parent
+# MODULE_DIR replaced by Paths config
 
 
 @dataclass
@@ -52,13 +53,13 @@ class SupplyChainImpactMapper:
             sector_tickers_path: Path to sector_tickers.json
         """
         # Load supply chain graph
-        graph_path = graph_path or MODULE_DIR / "supply_chain_graph.json"
+        graph_path = graph_path or Paths.SUPPLY_CHAIN_GRAPH
         self.supply_chain_graph = {}
         if graph_path.exists():
             self.supply_chain_graph = json.loads(graph_path.read_text())
         
         # Load sector tickers for stock mapping
-        sector_tickers_path = sector_tickers_path or MODULE_DIR / "sector_tickers.json"
+        sector_tickers_path = sector_tickers_path or Paths.SECTOR_TICKERS
         self.sector_tickers = {}
         if sector_tickers_path.exists():
             self.sector_tickers = json.loads(sector_tickers_path.read_text())
@@ -387,7 +388,7 @@ class SupplyChainImpactMapper:
 # Testing
 if __name__ == "__main__":
     from datetime import datetime
-    from news_storage import SentimentData
+    from app.core.models import SentimentData
     
     # Initialize mapper
     mapper = SupplyChainImpactMapper()

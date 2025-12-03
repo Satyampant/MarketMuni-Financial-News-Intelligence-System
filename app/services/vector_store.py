@@ -4,7 +4,7 @@ from sentence_transformers import SentenceTransformer
 from typing import List, Dict, Any, Optional
 from pathlib import Path
 import json
-from news_storage import NewsArticle
+from app.core.models import NewsArticle
 import numpy as np
 
 class VectorStore:

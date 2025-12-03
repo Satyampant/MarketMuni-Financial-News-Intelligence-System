@@ -1,3 +1,4 @@
+from app.core.config import Paths
 from enum import Enum
 from typing import List, Dict, Any, Optional, Set
 from dataclasses import dataclass
@@ -5,16 +6,14 @@ import re
 from pathlib import Path
 import json
 
-from news_storage import NewsArticle
-from vector_store import VectorStore
-from entity_extraction import EntityExtractor
-from stock_impact import StockImpactMapper
+from app.core.models import NewsArticle
+from app.services.vector_store import VectorStore
+from app.agents.entity_extraction import EntityExtractor
+from app.agents.stock_impact import StockImpactMapper
 
-MODULE_DIR = Path(__file__).parent
 
 
 class QueryStrategy(Enum):
-    """Query processing strategies"""
     DIRECT_MENTION = "direct_mention"
     SECTOR_WIDE = "sector_wide"
     REGULATOR_FILTER = "regulator_filter"
@@ -23,7 +22,6 @@ class QueryStrategy(Enum):
 
 @dataclass
 class QueryContext:
-    """Expanded query context with entities, strategies, and sentiment filter"""
     original_query: str
     expanded_terms: List[str]
     companies: List[str]
@@ -50,8 +48,8 @@ class QueryProcessor:
         self.stock_mapper = stock_mapper
         
         # Load mappings
-        alias_path = alias_path or MODULE_DIR / "company_aliases.json"
-        sector_path = sector_path or MODULE_DIR / "sector_tickers.json"
+        alias_path = alias_path or Paths.COMPANY_ALIASES
+        sector_path = sector_path or Paths.SECTOR_TICKERS
         
         self.company_aliases = {}
         if alias_path.exists():
@@ -61,7 +59,7 @@ class QueryProcessor:
         if sector_path.exists():
             self.sector_tickers = json.loads(sector_path.read_text())
         
-        # Build reverse mappings
+        # Building reverse mappings
         self.company_to_sector = {}
         self.sector_to_companies = {}
         
@@ -74,27 +72,21 @@ class QueryProcessor:
                         self.sector_to_companies[sector] = []
                     self.sector_to_companies[sector].append(company)
     
-    def expand_query(
-        self, 
-        query: str, 
-        sentiment_filter: Optional[str] = None
-    ) -> QueryContext:
+    def expand_query(self, query: str, sentiment_filter: Optional[str] = None) -> QueryContext:
         """
         Expand query with related entities and create multiple focused queries.
-        
         Multi-Query Approach:
         - Primary Query: The original user query (preserves semantic meaning)
         - Context Queries: Additional targeted searches based on detected strategies
         - Sentiment Filter: Optional filter for bullish/bearish/neutral articles
         """
-        # Extract entities from query
+        
         entities = self.entity_extractor.extract_entities(query)
         
         companies = entities.get("Companies", [])
         sectors = entities.get("Sectors", [])
         regulators = entities.get("Regulators", [])
         
-        # Determine query strategies
         strategies = self._determine_strategies(query, companies, sectors, regulators)
         
         # Build primary query (always the original query)
@@ -121,21 +113,21 @@ class QueryProcessor:
                 if ticker:
                     stock_symbols.append(ticker)
         
-        # SECTOR_WIDE strategy: Add dedicated sector searches
+        # SECTOR_WIDE strategy: Adding dedicated sector searches
         if QueryStrategy.SECTOR_WIDE in strategies:
             for sector in sectors:
-                # Add focused sector query
+                # Adding focused sector query
                 context_queries.append(f"{sector} sector news")
                 context_queries.append(f"{sector} industry update")
                 expanded_terms.append(sector)
                 
-                # Add sector companies for filtering
+                # Adding sector companies for filtering
                 sector_companies = self.sector_to_companies.get(sector, [])
                 for comp in sector_companies:
                     if comp not in companies:
                         companies.append(comp)
                 
-                # Add sector tickers
+                # Adding sector tickers
                 sector_tickers = self.sector_tickers.get(sector, [])
                 stock_symbols.extend(sector_tickers)
         
@@ -149,7 +141,7 @@ class QueryProcessor:
         # DIRECT_MENTION strategy: Add company-specific searches if not already in query
         if QueryStrategy.DIRECT_MENTION in strategies:
             for company in companies:
-                # Only add if company is not prominently in original query
+                # Only add if company is not in original query
                 if company.lower() not in query.lower():
                     context_queries.append(f"{company} news")
         
@@ -173,7 +165,7 @@ class QueryProcessor:
         sectors: List[str],
         regulators: List[str]
     ) -> List[QueryStrategy]:
-        """Determine which query strategies to apply"""
+        """which query strategies to apply"""
         strategies = []
         
         # Check for direct company mentions
@@ -199,19 +191,16 @@ class QueryProcessor:
         return strategies
     
     def _is_sector_query(self, query: str) -> bool:
-        """Check if query is sector-related"""
         sector_keywords = ["sector", "industry", "industries", "segment"]
         query_lower = query.lower()
         return any(kw in query_lower for kw in sector_keywords)
     
     def _is_regulator_query(self, query: str) -> bool:
-        """Check if query is regulator-related"""
         regulator_keywords = ["policy", "regulation", "regulatory", "central bank"]
         query_lower = query.lower()
         return any(kw in query_lower for kw in regulator_keywords)
     
     def _is_thematic_query(self, query: str) -> bool:
-        """Check if query is thematic (e.g., 'interest rate impact')"""
         thematic_keywords = [
             "impact", "effect", "influence", "trend", "outlook",
             "rate", "inflation", "growth", "market", "economic"
@@ -255,7 +244,7 @@ class QueryProcessor:
         primary_results = self.vector_store.search(
             context.primary_query,
             top_k=top_k * 2,
-            sentiment_filter=sentiment_filter  # Apply sentiment filter in vector search
+            sentiment_filter=sentiment_filter  # Applying sentiment filter in vector search
         )
         
         for result in primary_results:
@@ -300,11 +289,7 @@ class QueryProcessor:
         
         return articles
     
-    def _apply_filters(
-        self,
-        results: List[Dict[str, Any]],
-        context: QueryContext
-    ) -> List[Dict[str, Any]]:
+    def _apply_filters(self,results: List[Dict[str, Any]],context: QueryContext) -> List[Dict[str, Any]]:
         """Apply strategy-based filters to results"""
         filtered = []
         
@@ -318,7 +303,6 @@ class QueryProcessor:
             if isinstance(impacted_stocks, str):
                 impacted_stocks = json.loads(impacted_stocks)
             
-            # Calculate match scores for different strategies
             match_scores = {
                 "direct_mention": 0.0,
                 "sector_wide": 0.0,
@@ -378,11 +362,7 @@ class QueryProcessor:
         
         return filtered
     
-    def _rerank_results(
-        self,
-        results: List[Dict[str, Any]],
-        context: QueryContext
-    ) -> List[Dict[str, Any]]:
+    def _rerank_results(self,results: List[Dict[str, Any]],context: QueryContext) -> List[Dict[str, Any]]:
         """
         Re-rank results with improved scoring and sentiment boosting.
         
@@ -398,7 +378,6 @@ class QueryProcessor:
             strategy_score = result["max_strategy_score"]
             query_source = result.get("query_source", "context")
             
-            # Boost for primary query results
             primary_boost = 1.1 if query_source == "primary" else 1.0
             
             # Strategy-based weighting
@@ -505,8 +484,7 @@ class QueryProcessor:
     
     def explain_query(self, query_text: str, sentiment_filter: Optional[str] = None) -> Dict[str, Any]:
         """
-        Explain how a query will be processed (for debugging).
-        
+        Explains how a query will be processed (for debugging).
         Returns:
             Dictionary with query expansion and strategy information
         """

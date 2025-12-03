@@ -314,5 +314,129 @@
         {"sector": "Residential", "weight": 0.90},
         {"sector": "Commercial", "weight": 0.85}
       ]
+    },
+
+    
+    "Paints": {
+      "depends_on": [
+        {"sector": "Chemicals", "weight": 0.90},
+        {"sector": "Packaging", "weight": 0.60},
+        {"sector": "Energy", "weight": 0.55}
+      ],
+      "impacts": [
+        {"sector": "Real Estate", "weight": 0.85},
+        {"sector": "Construction", "weight": 0.80},
+        {"sector": "Auto", "weight": 0.70}
+      ]
+    },
+    "Metals": {
+      "depends_on": [
+        {"sector": "Mining", "weight": 0.95},
+        {"sector": "Energy", "weight": 0.90},
+        {"sector": "Coal", "weight": 0.70}
+      ],
+      "impacts": [
+        {"sector": "Auto", "weight": 0.75},
+        {"sector": "Construction", "weight": 0.80},
+        {"sector": "Infrastructure", "weight": 0.75},
+        {"sector": "Defense", "weight": 0.70}
+      ]
+    },
+    "Packaging": {
+      "depends_on": [
+        {"sector": "Plastics", "weight": 0.85},
+        {"sector": "Paper", "weight": 0.75},
+        {"sector": "Chemicals", "weight": 0.70}
+      ],
+      "impacts": [
+        {"sector": "FMCG", "weight": 0.95},
+        {"sector": "Pharma", "weight": 0.90},
+        {"sector": "E-commerce", "weight": 0.85},
+        {"sector": "Food Processing", "weight": 0.90}
+      ]
+    },
+    "Food Processing": {
+      "depends_on": [
+        {"sector": "Agriculture", "weight": 0.95},
+        {"sector": "Packaging", "weight": 0.80},
+        {"sector": "Energy", "weight": 0.70},
+        {"sector": "Logistics", "weight": 0.75}
+      ],
+      "impacts": [
+        {"sector": "Retail", "weight": 0.90},
+        {"sector": "E-commerce", "weight": 0.80},
+        {"sector": "Hospitality", "weight": 0.75}
+      ]
+    },
+    "Beverages": {
+      "depends_on": [
+        {"sector": "Agriculture", "weight": 0.85},
+        {"sector": "Packaging", "weight": 0.80},
+        {"sector": "Water Resources", "weight": 0.70}
+      ],
+      "impacts": [
+        {"sector": "Retail", "weight": 0.85},
+        {"sector": "Hospitality", "weight": 0.80}
+      ]
+    },
+    "Manufacturing": {
+      "depends_on": [
+        {"sector": "Steel", "weight": 0.80},
+        {"sector": "Energy", "weight": 0.85},
+        {"sector": "Machinery", "weight": 0.75},
+        {"sector": "Labour", "weight": 0.70}
+      ],
+      "impacts": [
+        {"sector": "Retail", "weight": 0.70},
+        {"sector": "Export", "weight": 0.75},
+        {"sector": "Infrastructure", "weight": 0.65}
+      ]
+    },
+    "Renewables": {
+      "depends_on": [
+        {"sector": "Semiconductors", "weight": 0.70},
+        {"sector": "Steel", "weight": 0.65},
+        {"sector": "Infrastructure", "weight": 0.60}
+      ],
+      "impacts": [
+        {"sector": "Energy", "weight": 0.85},
+        {"sector": "Utilities", "weight": 0.80}
+      ]
+    },
+    "Paper": {
+      "depends_on": [
+        {"sector": "Agriculture", "weight": 0.75},
+        {"sector": "Chemicals", "weight": 0.70},
+        {"sector": "Energy", "weight": 0.65}
+      ],
+      "impacts": [
+        {"sector": "Packaging", "weight": 0.85},
+        {"sector": "Education", "weight": 0.70},
+        {"sector": "Publishing", "weight": 0.80}
+      ]
+    },
+    "Plastics": {
+      "depends_on": [
+        {"sector": "Oil & Gas", "weight": 0.95},
+        {"sector": "Chemicals", "weight": 0.85}
+      ],
+      "impacts": [
+        {"sector": "Packaging", "weight": 0.90},
+        {"sector": "Auto", "weight":0.75},
+        {"sector": "Construction", "weight": 0.70}
+      ]
+    },
+    "Machinery": {
+      "depends_on": [
+        {"sector": "Steel", "weight": 0.85},
+        {"sector": "Semiconductors", "weight": 0.70},
+        {"sector": "Energy", "weight": 0.65}
+      ],
+      "impacts": [
+        {"sector": "Manufacturing", "weight": 0.90},
+        {"sector": "Construction", "weight": 0.80},
+        {"sector": "Mining", "weight": 0.85},
+        {"sector": "Agriculture", "weight": 0.75}
+      ]
     }
   }

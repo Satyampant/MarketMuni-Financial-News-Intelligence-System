@@ -1,3 +1,4 @@
+from app.core.config import Paths
 """
 Rule-Based Sentiment Classifier for Financial News
 Production-grade implementation with spaCy integration and optimized algorithms
@@ -7,8 +8,8 @@ from typing import Dict, Any, Set, List, Tuple, Optional
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from news_storage import NewsArticle, SentimentData
-from entity_extraction import EntityExtractor
+from app.core.models import NewsArticle, SentimentData
+from app.agents.entity_extraction import EntityExtractor
 
 try:
     import spacy
@@ -17,7 +18,7 @@ try:
 except ImportError:
     SPACY_AVAILABLE = False
 
-MODULE_DIR = Path(__file__).parent
+# MODULE_DIR replaced by Paths config
 
 
 @dataclass
@@ -65,7 +66,9 @@ class RuleBasedSentimentClassifier:
         "growth", "profit", "gain", "expansion", "increase", "rise",
         "dividend", "buyback", "acquisition", "upgrade", "positive",
         "strong", "improve", "recover", "opportunity", "favorable",
-        "strength", "advance", "progress", "success", "enhance"
+        "strength", "advance", "progress", "success", "enhance",
+        "accelerate", "outpace", "momentum", "rebound", "resilient", "windfall", 
+        "margin expansion", "market share gain", "capacity expansion"
     }
     
     # Moderate bearish signals (weight: 2.0)
@@ -73,7 +76,9 @@ class RuleBasedSentimentClassifier:
         "decline", "loss", "fall", "drop", "layoff", "concern",
         "risk", "slowdown", "contraction", "cut", "reduce", "lower",
         "deteriorate", "struggle", "weak", "negative", "downside",
-        "pressure", "challenge", "headwind", "uncertainty"
+        "pressure", "challenge", "headwind", "uncertainty",
+        "decelerate", "underperform", "headwinds", "writedown", "provision", 
+        "margin compression", "market share loss", "capacity constraint"
     }
     
     # Weak bullish signals (weight: 1.0)
@@ -114,7 +119,16 @@ class RuleBasedSentimentClassifier:
         "rates": 1.2,
         "policy rate": 1.3,
         "quarterly results": 1.2,
-        "revenue": 1.1
+        "revenue": 1.1,
+        "rights issue": 1.2,
+        "delisting": 1.4,
+        "share buyback": 1.3,
+        "bonus issue": 1.2,
+        "split": 1.1,
+        "consolidation": 1.1,
+        "restructuring": 1.2,
+        "divestment": 1.1,
+        "capital raising": 1.2
     }
     
     # Entity type weights
