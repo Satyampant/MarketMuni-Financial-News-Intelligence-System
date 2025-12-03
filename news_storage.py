@@ -69,7 +69,8 @@ class NewsArticle:
     timestamp: datetime
     raw_text: str = field(default="")
     impacted_stocks: List[Dict] = field(default_factory=list)
-    sentiment: Optional[Dict[str, Any]] = None  # Sentiment analysis data
+    sentiment: Optional[Dict[str, Any]] = None  
+    cross_impacts: List[Dict] = field(default_factory=list)
     
     def __post_init__(self):
         if isinstance(self.timestamp, str):
@@ -86,6 +87,14 @@ class NewsArticle:
     def has_sentiment(self) -> bool:
         """Check if article has sentiment analysis data"""
         return self.sentiment is not None
+
+    def set_cross_impacts(self, impacts: List[Dict]) -> None:
+        """Attach cross-sectoral impact analysis"""
+        self.cross_impacts = impacts
+    
+    def has_cross_impacts(self) -> bool:
+        """Check if article has cross-impact analysis"""
+        return len(self.cross_impacts) > 0
 
 
 class NewsStorage:

@@ -1,4 +1,4 @@
-from typing import TypedDict, List, Annotated, Optional
+from typing import TypedDict, List, Annotated, Optional, Dict, Any
 import operator
 from datetime import datetime
 
@@ -11,15 +11,17 @@ from stock_impact import StockImpactMapper
 from vector_store import VectorStore
 from query_processor import QueryProcessor
 from sentiment_hybrid import HybridSentimentClassifier
+from supply_chain_mapper import SupplyChainImpactMapper
 
 
 class NewsIntelligenceState(TypedDict):
-    """Enhanced state with sentiment analysis support"""
+    """Enhanced state with sentiment analysis and cross-impact support"""
     articles: Annotated[List[NewsArticle], operator.add]
     current_article: Optional[NewsArticle]
     duplicates: Annotated[List[str], operator.add]
     entities: Optional[dict]
     impacted_stocks: Optional[List[dict]]
+    cross_impacts: Optional[List[Dict]]  # NEW: Supply chain cross-impacts
     sentiment: Optional[dict]
     query_text: Optional[str]
     sentiment_filter: Optional[str]
@@ -37,7 +39,8 @@ class NewsIntelligenceGraph:
         entity_extractor: Optional[EntityExtractor] = None,
         stock_mapper: Optional[StockImpactMapper] = None,
         sentiment_agent: Optional[HybridSentimentClassifier] = None,
-        sentiment_method: str = "hybrid" 
+        supply_chain_mapper: Optional[SupplyChainImpactMapper] = None,
+        sentiment_method: str = "hybrid"
     ):
         self.storage = storage
         self.vector_store = vector_store
@@ -52,6 +55,9 @@ class NewsIntelligenceGraph:
             entity_extractor=self.entity_extractor
         )
         
+        # Initialize Supply Chain Impact Mapper
+        self.supply_chain_mapper = supply_chain_mapper or SupplyChainImpactMapper()
+        
         # Initialize QueryProcessor once
         self.query_processor = QueryProcessor(
             vector_store=self.vector_store,
@@ -64,7 +70,7 @@ class NewsIntelligenceGraph:
         self.query_app = self._build_query_graph()
     
     def _build_ingestion_graph(self):
-        """Construct the main ingestion pipeline with sentiment analysis"""
+        """Construct the main ingestion pipeline with cross-impact analysis"""
         graph_builder = StateGraph(NewsIntelligenceState)
         
         # Add all agent nodes
@@ -72,16 +78,18 @@ class NewsIntelligenceGraph:
         graph_builder.add_node("deduplication", self._deduplication_agent)
         graph_builder.add_node("entity_extraction", self._entity_extraction_agent)
         graph_builder.add_node("impact_mapper", self._impact_mapper_agent)
+        graph_builder.add_node("cross_impact", self._cross_impact_agent)  # NEW
         graph_builder.add_node("sentiment_analysis", self._sentiment_analysis_agent)
         graph_builder.add_node("indexing", self._indexing_agent)
         
-        # Define pipeline flow with sentiment analysis
+        # Define pipeline flow with cross-impact analysis
         graph_builder.add_edge(START, "ingestion")
         graph_builder.add_edge("ingestion", "deduplication")
         graph_builder.add_edge("deduplication", "entity_extraction")
         graph_builder.add_edge("entity_extraction", "impact_mapper")
-        graph_builder.add_edge("impact_mapper", "sentiment_analysis")
-        graph_builder.add_edge("sentiment_analysis", "indexing")
+        graph_builder.add_edge("impact_mapper", "sentiment_analysis") 
+        graph_builder.add_edge("sentiment_analysis", "cross_impact") 
+        graph_builder.add_edge("cross_impact", "indexing")
         graph_builder.add_edge("indexing", END)
         
         return graph_builder.compile()
@@ -194,6 +202,71 @@ class NewsIntelligenceGraph:
             "stats": stats
         }
     
+    def _cross_impact_agent(self, state: NewsIntelligenceState) -> dict:
+        """
+        Agent 4.5: Cross-Impact Analysis
+        Analyzes supply chain relationships and cross-sectoral effects
+        """
+        article = state["current_article"]
+        entities = state["entities"]
+        
+        # Check if article has sectors to analyze
+        sectors = entities.get("Sectors", [])
+        
+        if not sectors:
+            # No sectors found, skip cross-impact analysis
+            stats = state.get("stats", {})
+            stats["cross_impacts_found"] = 0
+            stats["upstream_dependencies"] = 0
+            stats["downstream_impacts"] = 0
+            
+            return {
+                "current_article": article,
+                "cross_impacts": [],
+                "stats": stats
+            }
+        
+        # Generate cross-impact insights
+        cross_impacts = self.supply_chain_mapper.generate_cross_impact_insights(
+            article, 
+            entities
+        )
+        
+        # Convert to dict format and attach to article
+        cross_impact_dicts = [impact.to_dict() for impact in cross_impacts]
+        article.cross_impacts = cross_impact_dicts
+        
+        # Count upstream vs downstream relationships
+        upstream_count = sum(
+            1 for impact in cross_impacts 
+            if impact.relationship_type == "upstream_demand_shock"
+        )
+        downstream_count = sum(
+            1 for impact in cross_impacts 
+            if impact.relationship_type == "downstream_supply_impact"
+        )
+        
+        # Update stats
+        stats = state.get("stats", {})
+        stats["cross_impacts_found"] = len(cross_impacts)
+        stats["upstream_dependencies"] = upstream_count
+        stats["downstream_impacts"] = downstream_count
+        
+        if cross_impacts:
+            # Add top impact details for debugging
+            top_impact = cross_impacts[0]
+            stats["top_cross_impact"] = {
+                "target_sector": top_impact.target_sector,
+                "impact_score": top_impact.impact_score,
+                "relationship_type": top_impact.relationship_type
+            }
+        
+        return {
+            "current_article": article,
+            "cross_impacts": cross_impact_dicts,
+            "stats": stats
+        }
+    
     def _sentiment_analysis_agent(self, state: NewsIntelligenceState) -> dict:
         """
         Agent 5: Sentiment Analysis - Analyzes article sentiment
@@ -236,7 +309,7 @@ class NewsIntelligenceGraph:
         # Store in NewsStorage
         self.storage.add_article(article)
         
-        # Index in VectorStore (now includes sentiment data)
+        # Index in VectorStore (now includes sentiment and cross-impact data)
         self.vector_store.index_article(article)
         
         stats = state.get("stats", {})
@@ -288,7 +361,7 @@ class NewsIntelligenceGraph:
         Execute full ingestion pipeline for a single article.
         
         Flow: ingestion → deduplication → entity_extraction → 
-              impact_mapper → sentiment_analysis → indexing
+              impact_mapper → cross_impact → sentiment_analysis → indexing
         
         Args:
             article: NewsArticle to process
@@ -302,6 +375,7 @@ class NewsIntelligenceGraph:
             "duplicates": [],
             "entities": None,
             "impacted_stocks": None,
+            "cross_impacts": None,  # NEW
             "sentiment": None,
             "query_text": None,
             "sentiment_filter": None,
@@ -332,6 +406,7 @@ class NewsIntelligenceGraph:
             "duplicates": [],
             "entities": None,
             "impacted_stocks": None,
+            "cross_impacts": None,
             "sentiment": None,
             "query_text": query_text,
             "sentiment_filter": sentiment_filter,
@@ -345,7 +420,7 @@ class NewsIntelligenceGraph:
         return final_state
     
     def get_stats(self) -> dict:
-        """Get system statistics including sentiment analysis info"""
+        """Get system statistics including sentiment analysis and cross-impact info"""
         total_articles = self.storage.article_count()
         vector_count = self.vector_store.count()
         
@@ -354,6 +429,15 @@ class NewsIntelligenceGraph:
         
         # Get sentiment agent info
         sentiment_method_info = self.sentiment_agent.get_method_info()
+        
+        # Get supply chain mapper info
+        supply_chain_info = {
+            "sectors_mapped": len(self.supply_chain_mapper.supply_chain_graph),
+            "total_relationships": sum(
+                len(sector_data.get("depends_on", [])) + len(sector_data.get("impacts", []))
+                for sector_data in self.supply_chain_mapper.supply_chain_graph.values()
+            )
+        }
         
         return {
             "total_articles_stored": total_articles,
@@ -366,5 +450,6 @@ class NewsIntelligenceGraph:
                 "method": sentiment_method_info,
                 "statistics": sentiment_stats
             },
+            "supply_chain_analysis": supply_chain_info,
             "status": "operational"
         }
