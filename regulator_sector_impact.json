@@ -1,8 +1,13 @@
 {
-    "RBI": ["Banking", "Finance"],
-    "SEBI": ["Banking", "Finance", "IT", "Auto", "Energy"],
-    "IRDAI": ["Insurance"], 
-    "US FDA": ["Pharma"],
-    "DOT": ["Telecom"],
-    "TRAI": ["Telecom"]
+    "RBI": ["Banking", "Finance", "NBFC", "Real Estate", "Infrastructure"],
+    "SEBI": ["Banking", "Finance", "IT", "Auto", "Energy", "Retail", "Metals"],
+    "IRDAI": ["Insurance", "Healthcare"], 
+    "US FDA": ["Pharma", "Chemicals", "Food Processing"],
+    "DOT": ["Telecom", "IT"],
+    "TRAI": ["Telecom", "Media"],
+    "DGCA": ["Aviation", "Logistics", "Tourism"],
+    "RERA": ["Real Estate", "Construction", "Infrastructure"],
+    "FSSAI": ["FMCG", "Agriculture", "Retail", "Hospitality"],
+    "Ministry of Defence": ["Defense", "Aviation", "Shipbuilding"],
+    "CCI": ["E-commerce", "Cement", "Steel", "Telecom"]
 }

@@ -1,0 +1,318 @@
+{
+    "Auto": {
+      "depends_on": [
+        {"sector": "Steel", "weight": 0.85},
+        {"sector": "Semiconductors", "weight": 0.75},
+        {"sector": "Rubber", "weight": 0.65},
+        {"sector": "Energy", "weight": 0.55},
+        {"sector": "Chemicals", "weight": 0.50}
+      ],
+      "impacts": [
+        {"sector": "Logistics", "weight": 0.60},
+        {"sector": "Insurance", "weight": 0.45},
+        {"sector": "Finance", "weight": 0.50}
+      ]
+    },
+    "Steel": {
+      "depends_on": [
+        {"sector": "Mining", "weight": 0.90},
+        {"sector": "Energy", "weight": 0.85},
+        {"sector": "Coal", "weight": 0.75},
+        {"sector": "Logistics", "weight": 0.60}
+      ],
+      "impacts": [
+        {"sector": "Auto", "weight": 0.85},
+        {"sector": "Construction", "weight": 0.80},
+        {"sector": "Infrastructure", "weight": 0.75},
+        {"sector": "Railways", "weight": 0.65},
+        {"sector": "Cement", "weight": 0.55}
+      ]
+    },
+    "IT": {
+      "depends_on": [
+        {"sector": "Semiconductors", "weight": 0.70},
+        {"sector": "Telecom", "weight": 0.65},
+        {"sector": "Energy", "weight": 0.50}
+      ],
+      "impacts": [
+        {"sector": "Banking", "weight": 0.80},
+        {"sector": "Finance", "weight": 0.75},
+        {"sector": "Healthcare", "weight": 0.60},
+        {"sector": "Retail", "weight": 0.55},
+        {"sector": "Manufacturing", "weight": 0.50}
+      ]
+    },
+    "Pharma": {
+      "depends_on": [
+        {"sector": "Chemicals", "weight": 0.90},
+        {"sector": "Packaging", "weight": 0.65},
+        {"sector": "Logistics", "weight": 0.60},
+        {"sector": "Energy", "weight": 0.50}
+      ],
+      "impacts": [
+        {"sector": "Healthcare", "weight": 0.95},
+        {"sector": "Retail", "weight": 0.55},
+        {"sector": "Export", "weight": 0.70}
+      ]
+    },
+    "Energy": {
+      "depends_on": [
+        {"sector": "Oil & Gas", "weight": 0.95},
+        {"sector": "Coal", "weight": 0.85},
+        {"sector": "Renewables", "weight": 0.60},
+        {"sector": "Infrastructure", "weight": 0.55}
+      ],
+      "impacts": [
+        {"sector": "Manufacturing", "weight": 0.90},
+        {"sector": "Steel", "weight": 0.85},
+        {"sector": "Cement", "weight": 0.80},
+        {"sector": "Auto", "weight": 0.75},
+        {"sector": "IT", "weight": 0.65},
+        {"sector": "Pharma", "weight": 0.60},
+        {"sector": "Telecom", "weight": 0.55},
+        {"sector": "Aviation", "weight": 0.70}
+      ]
+    },
+    "Cement": {
+      "depends_on": [
+        {"sector": "Mining", "weight": 0.85},
+        {"sector": "Energy", "weight": 0.90},
+        {"sector": "Coal", "weight": 0.80},
+        {"sector": "Logistics", "weight": 0.70}
+      ],
+      "impacts": [
+        {"sector": "Construction", "weight": 0.95},
+        {"sector": "Infrastructure", "weight": 0.90},
+        {"sector": "Real Estate", "weight": 0.85}
+      ]
+    },
+    "Telecom": {
+      "depends_on": [
+        {"sector": "Semiconductors", "weight": 0.75},
+        {"sector": "Energy", "weight": 0.70},
+        {"sector": "IT", "weight": 0.65},
+        {"sector": "Infrastructure", "weight": 0.60}
+      ],
+      "impacts": [
+        {"sector": "IT", "weight": 0.80},
+        {"sector": "Banking", "weight": 0.70},
+        {"sector": "E-commerce", "weight": 0.75},
+        {"sector": "Media", "weight": 0.65},
+        {"sector": "Finance", "weight": 0.60}
+      ]
+    },
+    "Banking": {
+      "depends_on": [
+        {"sector": "IT", "weight": 0.85},
+        {"sector": "Telecom", "weight": 0.65},
+        {"sector": "Infrastructure", "weight": 0.50}
+      ],
+      "impacts": [
+        {"sector": "Real Estate", "weight": 0.90},
+        {"sector": "Auto", "weight": 0.75},
+        {"sector": "Infrastructure", "weight": 0.80},
+        {"sector": "Manufacturing", "weight": 0.70},
+        {"sector": "Retail", "weight": 0.65},
+        {"sector": "NBFC", "weight": 0.85}
+      ]
+    },
+    "Semiconductors": {
+      "depends_on": [
+        {"sector": "Chemicals", "weight": 0.80},
+        {"sector": "Energy", "weight": 0.75},
+        {"sector": "Mining", "weight": 0.70}
+      ],
+      "impacts": [
+        {"sector": "IT", "weight": 0.90},
+        {"sector": "Auto", "weight": 0.85},
+        {"sector": "Telecom", "weight": 0.80},
+        {"sector": "Consumer Electronics", "weight": 0.95},
+        {"sector": "Defense", "weight": 0.70}
+      ]
+    },
+    "Chemicals": {
+      "depends_on": [
+        {"sector": "Oil & Gas", "weight": 0.85},
+        {"sector": "Energy", "weight": 0.75},
+        {"sector": "Mining", "weight": 0.60}
+      ],
+      "impacts": [
+        {"sector": "Pharma", "weight": 0.90},
+        {"sector": "Auto", "weight": 0.70},
+        {"sector": "Agriculture", "weight": 0.80},
+        {"sector": "Textiles", "weight": 0.75},
+        {"sector": "Packaging", "weight": 0.65}
+      ]
+    },
+    "Rubber": {
+      "depends_on": [
+        {"sector": "Agriculture", "weight": 0.85},
+        {"sector": "Chemicals", "weight": 0.70},
+        {"sector": "Energy", "weight": 0.55}
+      ],
+      "impacts": [
+        {"sector": "Auto", "weight": 0.95},
+        {"sector": "Footwear", "weight": 0.70},
+        {"sector": "Industrial Goods", "weight": 0.60}
+      ]
+    },
+    "Logistics": {
+      "depends_on": [
+        {"sector": "Energy", "weight": 0.90},
+        {"sector": "Auto", "weight": 0.75},
+        {"sector": "IT", "weight": 0.60},
+        {"sector": "Infrastructure", "weight": 0.70}
+      ],
+      "impacts": [
+        {"sector": "E-commerce", "weight": 0.95},
+        {"sector": "Retail", "weight": 0.85},
+        {"sector": "Manufacturing", "weight": 0.80},
+        {"sector": "Pharma", "weight": 0.75},
+        {"sector": "FMCG", "weight": 0.80}
+      ]
+    },
+    "Mining": {
+      "depends_on": [
+        {"sector": "Energy", "weight": 0.80},
+        {"sector": "Machinery", "weight": 0.75},
+        {"sector": "Logistics", "weight": 0.70}
+      ],
+      "impacts": [
+        {"sector": "Steel", "weight": 0.95},
+        {"sector": "Cement", "weight": 0.90},
+        {"sector": "Chemicals", "weight": 0.75},
+        {"sector": "Metals", "weight": 0.85}
+      ]
+    },
+    "Coal": {
+      "depends_on": [
+        {"sector": "Mining", "weight": 0.90},
+        {"sector": "Logistics", "weight": 0.80},
+        {"sector": "Railways", "weight": 0.75}
+      ],
+      "impacts": [
+        {"sector": "Energy", "weight": 0.95},
+        {"sector": "Steel", "weight": 0.85},
+        {"sector": "Cement", "weight": 0.80}
+      ]
+    },
+    "Oil & Gas": {
+      "depends_on": [
+        {"sector": "Infrastructure", "weight": 0.70},
+        {"sector": "Logistics", "weight": 0.75},
+        {"sector": "Machinery", "weight": 0.65}
+      ],
+      "impacts": [
+        {"sector": "Energy", "weight": 0.95},
+        {"sector": "Chemicals", "weight": 0.90},
+        {"sector": "Plastics", "weight": 0.85},
+        {"sector": "Aviation", "weight": 0.90},
+        {"sector": "Auto", "weight": 0.80}
+      ]
+    },
+    "Construction": {
+      "depends_on": [
+        {"sector": "Cement", "weight": 0.95},
+        {"sector": "Steel", "weight": 0.90},
+        {"sector": "Machinery", "weight": 0.75},
+        {"sector": "Energy", "weight": 0.70}
+      ],
+      "impacts": [
+        {"sector": "Real Estate", "weight": 0.90},
+        {"sector": "Infrastructure", "weight": 0.85},
+        {"sector": "Urban Development", "weight": 0.80}
+      ]
+    },
+    "Infrastructure": {
+      "depends_on": [
+        {"sector": "Steel", "weight": 0.85},
+        {"sector": "Cement", "weight": 0.90},
+        {"sector": "Banking", "weight": 0.75},
+        {"sector": "Energy", "weight": 0.70}
+      ],
+      "impacts": [
+        {"sector": "Logistics", "weight": 0.85},
+        {"sector": "Real Estate", "weight": 0.80},
+        {"sector": "Manufacturing", "weight": 0.70},
+        {"sector": "Economic Growth", "weight": 0.75}
+      ]
+    },
+    "Real Estate": {
+      "depends_on": [
+        {"sector": "Banking", "weight": 0.90},
+        {"sector": "Construction", "weight": 0.95},
+        {"sector": "Cement", "weight": 0.85},
+        {"sector": "Steel", "weight": 0.80}
+      ],
+      "impacts": [
+        {"sector": "NBFC", "weight": 0.80},
+        {"sector": "Home Furnishing", "weight": 0.75},
+        {"sector": "Consumer Durables", "weight": 0.70}
+      ]
+    },
+    "Agriculture": {
+      "depends_on": [
+        {"sector": "Chemicals", "weight": 0.80},
+        {"sector": "Energy", "weight": 0.65},
+        {"sector": "Machinery", "weight": 0.60},
+        {"sector": "Water Resources", "weight": 0.75}
+      ],
+      "impacts": [
+        {"sector": "FMCG", "weight": 0.90},
+        {"sector": "Food Processing", "weight": 0.95},
+        {"sector": "Textiles", "weight": 0.70},
+        {"sector": "Rubber", "weight": 0.65},
+        {"sector": "Beverages", "weight": 0.80}
+      ]
+    },
+    "FMCG": {
+      "depends_on": [
+        {"sector": "Agriculture", "weight": 0.85},
+        {"sector": "Packaging", "weight": 0.80},
+        {"sector": "Logistics", "weight": 0.75},
+        {"sector": "Chemicals", "weight": 0.60}
+      ],
+      "impacts": [
+        {"sector": "Retail", "weight": 0.90},
+        {"sector": "E-commerce", "weight": 0.75},
+        {"sector": "Advertising", "weight": 0.70}
+      ]
+    },
+    "Textiles": {
+      "depends_on": [
+        {"sector": "Agriculture", "weight": 0.80},
+        {"sector": "Chemicals", "weight": 0.75},
+        {"sector": "Energy", "weight": 0.65}
+      ],
+      "impacts": [
+        {"sector": "Retail", "weight": 0.80},
+        {"sector": "Export", "weight": 0.85},
+        {"sector": "Fashion", "weight": 0.90}
+      ]
+    },
+    "Aviation": {
+      "depends_on": [
+        {"sector": "Oil & Gas", "weight": 0.95},
+        {"sector": "Energy", "weight": 0.85},
+        {"sector": "IT", "weight": 0.65},
+        {"sector": "Infrastructure", "weight": 0.70}
+      ],
+      "impacts": [
+        {"sector": "Tourism", "weight": 0.90},
+        {"sector": "Logistics", "weight": 0.75},
+        {"sector": "Hospitality", "weight": 0.80}
+      ]
+    },
+    "Utilities": {
+      "depends_on": [
+        {"sector": "Energy", "weight": 0.95},
+        {"sector": "Infrastructure", "weight": 0.80},
+        {"sector": "Coal", "weight": 0.70}
+      ],
+      "impacts": [
+        {"sector": "Manufacturing", "weight": 0.85},
+        {"sector": "Residential", "weight": 0.90},
+        {"sector": "Commercial", "weight": 0.85}
+      ]
+    }
+  }

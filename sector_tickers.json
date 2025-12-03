@@ -1,35 +1,223 @@
 {
-    "Banking": [
-      "HDFCBANK",
-      "ICICIBANK",
-      "SBIN"
-    ],
-    "IT": [
-      "TCS",
-      "INFOSYS",
-      "WIPRO",
-      "TECHM"
-    ],
-    "Energy": [
-      "RELIANCE",
-      "ADANIGREEN"
-    ],
-    "Auto": [
-      "MAHINDRA",
-      "MARUTI",
-      "TATAMOTORS"
-    ],
-    "Telecom": [
-      "BHARTIARTL"
-    ],
-    "Pharma": [
-      "SUNPHARMA"
-    ],
-    "Cement": [
-      "ULTRATECH"
-    ],
-    "Utilities": [
-      "POWERGRID"
-    ]
-  }
-  
+  "Banking": [
+    "HDFCBANK",
+    "ICICIBANK",
+    "SBIN",
+    "KOTAKBANK",
+    "AXISBANK"
+  ],
+  "Finance": [
+    "BAJFINANCE",
+    "BAJAJFINSV",
+    "CHOLAFIN",
+    "MUTHOOTFIN",
+    "SHRIRAMFIN"
+  ],
+  "NBFC": [
+    "POONAWALLA",
+    "M&MFIN",
+    "SUNDARMFIN"
+  ],
+  "Insurance": [
+    "HDFCLIFE",
+    "SBILIFE",
+    "ICICIGI",
+    "LICI",
+    "GICRE"
+  ],
+  "IT": [
+    "TCS",
+    "INFOSYS",
+    "WIPRO",
+    "TECHM",
+    "HCLTECH",
+    "LTIM"
+  ],
+  "Energy": [
+    "RELIANCE",
+    "ADANIGREEN",
+    "NTPC",
+    "POWERGRID",
+    "TATASTYL"
+  ],
+  "Oil & Gas": [
+    "ONGC",
+    "IOC",
+    "BPCL",
+    "GAIL",
+    "OIL"
+  ],
+  "Auto": [
+    "MAHINDRA",
+    "MARUTI",
+    "TATAMOTORS",
+    "EICHERMOT",
+    "HEROMOTOCO"
+  ],
+  "Telecom": [
+    "BHARTIARTL",
+    "IDEA",
+    "INDUSTOWER"
+  ],
+  "Pharma": [
+    "SUNPHARMA",
+    "DRREDDY",
+    "CIPLA",
+    "DIVISLAB",
+    "APOLLOHOSP"
+  ],
+  "Healthcare": [
+    "MAXHEALTH",
+    "LALPATHLAB",
+    "METROPOLIS",
+    "FORTIS"
+  ],
+  "Cement": [
+    "ULTRATECH",
+    "ACC",
+    "AMBUJACEM",
+    "SHREECEM"
+  ],
+  "Utilities": [
+    "POWERGRID",
+    "ADANIPOWER",
+    "JSWENERGY"
+  ],
+  "Steel": [
+    "TATASTEEL",
+    "JINDALSTEL",
+    "JSWSTEEL",
+    "SAIL",
+    "APLAPOLLO"
+  ],
+  "Semiconductors": [
+    "TATAELXSI",
+    "DIXON",
+    "MOSCHIP",
+    "ASMTEC"
+  ],
+  "Rubber": [
+    "MRF",
+    "APOLLOTYRE",
+    "BALKRISIND",
+    "JKTYRE",
+    "CEATLTD"
+  ],
+  "Logistics": [
+    "DELHIVERY",
+    "CONCOR",
+    "BLUEDART",
+    "TCIEXP",
+    "MAHLOG"
+  ],
+  "Mining": [
+    "NMDC",
+    "VEDL",
+    "MOIL",
+    "KIOCL"
+  ],
+  "Coal": [
+    "COALINDIA",
+    "GMDC"
+  ],
+  "Construction": [
+    "LT",
+    "NCC",
+    "PNCINFRA",
+    "KNRCON"
+  ],
+  "Infrastructure": [
+    "IRB",
+    "GMRINFRA",
+    "ADANIENT"
+  ],
+  "Real Estate": [
+    "DLF",
+    "GODREJPROP",
+    "OBEROIRLTY",
+    "PHOENIXLTD",
+    "PRESTIGE"
+  ],
+  "Agriculture": [
+    "PIIND",
+    "UPL",
+    "COROMANDEL",
+    "GODREJAGRO",
+    "KAVERISEED"
+  ],
+  "FMCG": [
+    "HINDUNILVR",
+    "ITC",
+    "NESTLEIND",
+    "BRITANNIA",
+    "TATACONSUM",
+    "DABUR"
+  ],
+  "Textiles": [
+    "TRIDENT",
+    "WELSPUNLIV",
+    "KPRMILL",
+    "RAYMOND",
+    "VTL"
+  ],
+  "Aviation": [
+    "INDIGO",
+    "SPICEJET"
+  ],
+  "Chemicals": [
+    "PIDILITIND",
+    "SRF",
+    "TATACHEM",
+    "AARTIIND",
+    "FLUOROCHEM"
+  ],
+  "Retail": [
+    "TRENT",
+    "DMART",
+    "ABFRL",
+    "V2RETAIL"
+  ],
+  "Consumer Durables": [
+    "TITAN",
+    "HAVELLS",
+    "VOLTAS",
+    "WHIRLPOOL",
+    "BLUESTARCO"
+  ],
+  "Media": [
+    "ZEEL",
+    "PVRINOX",
+    "SUNTV",
+    "TV18BRDCST"
+  ],
+  "E-commerce": [
+    "NAUKRI",
+    "ZOMATO",
+    "PAYTM",
+    "NYKAA"
+  ],
+  "Railways": [
+    "RVNL",
+    "IRFC",
+    "IRCON",
+    "TITAGARH"
+  ],
+  "Defense": [
+    "HAL",
+    "BEL",
+    "MAZDOCK",
+    "BDL",
+    "COCHINSHIP"
+  ],
+  "Footwear": [
+    "BATAINDIA",
+    "RELAXO",
+    "METROBRAND",
+    "CAMPUS"
+  ],
+  "Hospitality": [
+    "INDHOTEL",
+    "EIHOTEL",
+    "LEMONTREE"
+  ]
+}
