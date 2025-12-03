@@ -219,5 +219,27 @@
     "INDHOTEL",
     "EIHOTEL",
     "LEMONTREE"
-  ]
+  ],
+
+
+  "Paints": ["ASIANPAINT", "BERGERPAINTS", "KANSAINER", "AKZOINDIA"],
+  "Metals": ["HINDALCO", "NATIONALUM", "JINDALSTEL", "VEDL"],
+  "Packaging": ["UFLEX", "MAXVIL", "TCPLTD"],
+  "Food Processing": ["ITC", "BRITANNIA", "NESTLEIND", "VARUNBEV", "TATACONSUM"],
+  "Beverages": ["TATACONSUM", "VARUNBEV", "RADICO", "UNITEDBREW"],
+  "Fashion": ["TRENT", "ABFRL", "ADITBIRLAFASHIONRETAIL", "RAYMONDLTD"],
+  "Tourism": ["INDHOTEL", "EIHOTEL", "LEMONTREE", "COX&KINGS"],
+  "Shipbuilding": ["COCHINSHIP", "MAZDA", "GRSE", "GSL"],
+  "Manufacturing": ["BHEL", "THERMAX", "ABB", "SIEMENS"],
+  "Export": ["GAIL", "ONGC", "SUNPHARMA", "TATAMOTORS"],
+  "Machinery": ["BHEL", "THERMAX", "CUMMINS", "GREAVES"],
+  "Water Resources": ["VATECH", "JALJEEVAN"],
+  "Residential": ["DLF", "GODREJPROP", "OBEROIRLTY", "PRESTIGE"],
+  "Commercial": ["DLF", "GODREJPROP", "BRIGADE", "PHOENIXLTD"],
+  "Urban Development": ["DLF", "GODREJPROP", "SOBHA"],
+  "Industrial Goods": ["ABB", "SIEMENS", "THERMAX", "BHEL"],
+  "Consumer Electronics": ["DIXON", "AMBER", "VOLTAS", "BLUESTARCO"],
+  "Home Furnishing": ["TITAN", "ASIAN GRANITO", "SYMPHONY"],
+  "Advertising": ["ZEEL", "SUNTV", "TV18BRDCST"],
+  "Plastics": ["SUPREME", "ASTRAL", "POLYCAB"]
 }

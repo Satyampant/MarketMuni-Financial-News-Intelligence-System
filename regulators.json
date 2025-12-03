@@ -69,5 +69,161 @@
     "ministry of defence",
     "defence acquisition council",
     "dac"
+  ],
+
+
+  "Ministry of Finance": [
+    "ministry of finance",
+    "finance ministry",
+    "mof",
+    "nirmala sitharaman"
+  ],
+  "Ministry of Commerce": [
+    "ministry of commerce",
+    "commerce ministry",
+    "directorate general of foreign trade",
+    "dgft"
+  ],
+  "Ministry of Power": [
+    "ministry of power",
+    "power ministry",
+    "central electricity authority",
+    "cea"
+  ],
+  "Ministry of Petroleum": [
+    "ministry of petroleum",
+    "petroleum ministry",
+    "mopng"
+  ],
+  "Ministry of Road Transport": [
+    "ministry of road transport",
+    "morth",
+    "nitin gadkari"
+  ],
+  "NHAI": [
+    "nhai",
+    "national highways authority of india"
+  ],
+  "GST Council": [
+    "gst council",
+    "goods and services tax council"
+  ],
+  "Income Tax Department": [
+    "income tax department",
+    "it department",
+    "cbdt",
+    "central board of direct taxes"
+  ],
+  "Customs": [
+    "customs",
+    "customs department",
+    "cbic",
+    "central board of indirect taxes"
+  ],
+  "NITI Aayog": [
+    "niti aayog",
+    "national institution for transforming india"
+  ],
+  "CAG": [
+    "cag",
+    "comptroller and auditor general"
+  ],
+  "NCLT": [
+    "nclt",
+    "national company law tribunal"
+  ],
+  "NCLAT": [
+    "nclat",
+    "national company law appellate tribunal"
+  ],
+  "NPCI": [
+    "npci",
+    "national payments corporation of india"
+  ],
+  "EPFO": [
+    "epfo",
+    "employees provident fund organisation"
+  ],
+  "ESIC": [
+    "esic",
+    "employees state insurance corporation"
+  ],
+  "Labour Ministry": [
+    "labour ministry",
+    "ministry of labour",
+    "ministry of labour and employment"
+  ],
+  "Environment Ministry": [
+    "environment ministry",
+    "moef",
+    "ministry of environment forest and climate change"
+  ],
+  "CPCB": [
+    "cpcb",
+    "central pollution control board"
+  ],
+  "Ministry of Coal": [
+    "ministry of coal",
+    "coal ministry"
+  ],
+  "Ministry of Steel": [
+    "ministry of steel",
+    "steel ministry"
+  ],
+  "DPIIT": [
+    "dpiit",
+    "department for promotion of industry and internal trade"
+  ],
+  "Startup India": [
+    "startup india",
+    "startup india initiative"
+  ],
+  "Make in India": [
+    "make in india"
+  ],
+  "CEA": [
+    "cea",
+    "central electricity authority"
+  ],
+  "CERC": [
+    "cerc",
+    "central electricity regulatory commission"
+  ],
+  "Petroleum Ministry": [
+    "petroleum ministry",
+    "ministry of petroleum and natural gas"
+  ],
+  "European Commission": [
+    "european commission",
+    "ec",
+    "eu commission"
+  ],
+  "SEC": [
+    "sec",
+    "securities and exchange commission"
+  ],
+  "Bank of England": [
+    "bank of england",
+    "boe"
+  ],
+  "ECB": [
+    "ecb",
+    "european central bank"
+  ],
+  "WHO": [
+    "who",
+    "world health organization"
+  ],
+  "WTO": [
+    "wto",
+    "world trade organization"
+  ],
+  "IMF": [
+    "imf",
+    "international monetary fund"
+  ],
+  "World Bank": [
+    "world bank",
+    "wb"
   ]
 }
