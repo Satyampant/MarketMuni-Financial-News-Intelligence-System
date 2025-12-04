@@ -5,7 +5,7 @@
 [![LangGraph](https://img.shields.io/badge/LangGraph-0.2.0-purple.svg)](https://github.com/langchain-ai/langgraph)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-> **Winner Solution for Tradl AI/ML & FinTech Hackathon** - A production-ready multi-agent system that transforms how traders and investors consume financial news through intelligent deduplication, entity extraction, sentiment analysis, and supply chain impact mapping.
+> **Solution for Tradl AI/ML & FinTech Hackathon** - A production-ready multi-agent system that transforms how traders and investors consume financial news through intelligent deduplication, entity extraction, sentiment analysis, and supply chain impact mapping.
 
 
 ---
@@ -530,7 +530,7 @@ Once the server is running, access:
 
 ## 🎁 Bonus Features
 
-### 1. Sentiment Analysis (20 Points)
+### 1. Sentiment Analysis
 
 **Implementation**: Hybrid approach combining rule-based lexicon analysis with FinBERT transformer
 
@@ -545,7 +545,7 @@ Once the server is running, access:
 - Sentiment-boosted query ranking (up to 1.5x multiplier)
 - Historical pattern analysis capability
 
-### 2. Supply Chain Impact Mapping (20 Points)
+### 2. Supply Chain Impact Mapping
 
 **Implementation**: Weighted directed graph with bidirectional traversal
 
@@ -679,7 +679,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ### Demo Video
 
-📹 [Watch 5-minute Demo](https://youtu.be/your-demo-link)
+📹 [Watch 5-minute Demo](https://youtu.be/dS-vUGwt-BI)
 
 ---
 
@@ -687,8 +687,8 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 **Project Maintainer**: [Satyam Pant]  
 **Email**: satyampant420@gmail.com  
-**GitHub**: [@yourusername](https://github.com/SatyamPant)  
-**LinkedIn**: [Your LinkedIn](https://www.linkedin.com/in/satyampant420/)
+**GitHub**: [@https://github.com/SatyamPant](https://github.com/SatyamPant)  
+**LinkedIn**: [https://www.linkedin.com/in/satyampant420/](https://www.linkedin.com/in/satyampant420/)
 
 ---
 
