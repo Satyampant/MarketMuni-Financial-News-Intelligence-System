@@ -166,6 +166,7 @@ Downstream Impacts (Supply Effects):
 
 ### LangGraph Multi-Agent Pipeline
 
+```mermaid
 graph TD
     subgraph "External World"
         News[Financial News Sources]
@@ -218,6 +219,7 @@ graph TD
     style SQL fill:#2E8B57,stroke:#fff,color:#fff
     style Ingest fill:#1E90FF,stroke:#fff,color:#fff
     style QProc fill:#FF4500,stroke:#fff,color:#fff
+```
 
 ### Data Flow
 
