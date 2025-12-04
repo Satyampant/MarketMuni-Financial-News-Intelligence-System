@@ -7,8 +7,6 @@ from app.api.schemas import (
     ArticleInput, ArticleOutput, IngestResponse, 
     QueryResponse, StatsResponse, SentimentDetailResponse
 )
-
-# Import Services & Workflows
 from app.services.storage import NewsStorage
 from app.services.vector_store import VectorStore
 from app.agents.deduplication import DeduplicationAgent
@@ -17,14 +15,15 @@ from app.agents.stock_impact import StockImpactMapper
 from app.agents.supply_chain import SupplyChainImpactMapper
 from app.workflows.graph import NewsIntelligenceGraph
 from app.core.config import Paths
+from app.core.config_loader import get_config
 
+config = get_config()
 router = APIRouter()
 
-# Initialize Components (Singleton)
-# Using Paths.CHROMA_DB ensures persistence in the data folder
+# Service initialization
 storage = NewsStorage()
 vector_store = VectorStore(
-    collection_name="financial_news",
+    collection_name=config.vector_store.collection_name,
     persist_directory=str(Paths.CHROMA_DB)
 )
 
@@ -33,6 +32,7 @@ entity_extractor = EntityExtractor()
 stock_mapper = StockImpactMapper()
 supply_chain_mapper = SupplyChainImpactMapper()
 
+# Orchestrator setup
 news_graph = NewsIntelligenceGraph(
     storage=storage,
     vector_store=vector_store,
@@ -40,7 +40,7 @@ news_graph = NewsIntelligenceGraph(
     entity_extractor=entity_extractor,
     stock_mapper=stock_mapper,
     supply_chain_mapper=supply_chain_mapper,
-    sentiment_method="hybrid"
+    sentiment_method=config.sentiment_analysis.method
 )
 
 @router.get("/", tags=["General"])
@@ -74,11 +74,13 @@ async def ingest_article(article_input: ArticleInput):
             raw_text=article_input.raw_text or article_input.content
         )
         
+        # Run graph pipeline
         result = news_graph.run_pipeline(article)
         
         if result.get("error"):
             raise HTTPException(status_code=400, detail=result["error"])
         
+        # Extract pipeline stats for response
         stats = result.get("stats", {})
         entities_stats = stats.get("entities_extracted", {})
         impact_breakdown = stats.get("impact_breakdown", {})
@@ -108,9 +110,13 @@ async def ingest_article(article_input: ArticleInput):
 @router.get("/query", response_model=QueryResponse, tags=["Query"])
 async def query_articles(
     q: str = Query(..., description="Natural language query"),
-    top_k: int = Query(10, ge=1, le=50),
+    top_k: int = Query(None, ge=1, le=50),
     filter_by_sentiment: Optional[str] = Query(None, description="Bullish, Bearish, or Neutral")
 ):
+    config = get_config()
+    if top_k is None:
+        top_k = config.query_processing.default_top_k
+
     try:
         if not q.strip():
             raise HTTPException(status_code=400, detail="Query cannot be empty")
@@ -120,9 +126,10 @@ async def query_articles(
         if result.get("error"):
             raise HTTPException(status_code=400, detail=result["error"])
             
+        # Format results
         articles = result.get("query_results", [])[:top_k]
-        
         article_outputs = []
+        
         for article in articles:
             sentiment_dict = article.sentiment if article.has_sentiment() else None
             article_outputs.append(ArticleOutput(

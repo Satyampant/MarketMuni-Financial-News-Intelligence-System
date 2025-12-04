@@ -1,30 +1,22 @@
-"""
-Hybrid Sentiment Classifier - Combines Rule-Based + FinBERT
-Production-grade sentiment analysis with fallback mechanisms
-"""
-
 from typing import Dict, Any, Optional, Literal
 from dataclasses import dataclass
 from app.core.models import NewsArticle, SentimentData
 from app.agents.entity_extraction import EntityExtractor
-
-# Import rule-based classifier
 from app.agents.sentiment.classifier import RuleBasedSentimentClassifier
+from app.core.config_loader import get_config
+import math
 
-# Import FinBERT with graceful fallback
 try:
     from app.agents.sentiment.finbert import FinBERTSentimentClassifier, FINBERT_AVAILABLE
 except ImportError:
     FINBERT_AVAILABLE = False
     FinBERTSentimentClassifier = None
 
-
 SentimentMethod = Literal["rule_based", "finbert", "hybrid"]
-
 
 @dataclass
 class HybridSentimentResult:
-    """Combined sentiment result from multiple methods"""
+    """Combined sentiment result from multiple methods."""
     classification: str
     confidence_score: float
     signal_strength: float
@@ -32,50 +24,35 @@ class HybridSentimentResult:
     analysis_method: str
     rule_based_result: Optional[Dict[str, Any]] = None
     finbert_result: Optional[Dict[str, Any]] = None
-    agreement_score: Optional[float] = None  # How much do both methods agree?
-
+    agreement_score: Optional[float] = None
 
 class HybridSentimentClassifier:
-    """
-    Hybrid sentiment classifier that combines rule-based and FinBERT approaches.
-    
-    Strategy:
-    - Rule-Based: Fast, interpretable, works immediately (baseline)
-    - FinBERT: High accuracy, understands context (enhancement)
-    - Hybrid: Combines both for maximum accuracy
-    
-    Fallback: If FinBERT unavailable, uses rule-based only
-    """
     
     def __init__(
         self,
-        method: SentimentMethod = "hybrid",
+        method: SentimentMethod = None,
         entity_extractor: Optional[EntityExtractor] = None,
-        finbert_model: str = "ProsusAI/finbert",
-        finbert_weight: float = 0.7,  # Weight for FinBERT in hybrid mode
-        rule_weight: float = 0.3  # Weight for rule-based in hybrid mode
+        finbert_model: str = None,
+        finbert_weight: float = None,
+        rule_weight: float = None
     ):
-        """
-        Initialize hybrid classifier.
-        
-        Args:
-            method: "rule_based", "finbert", or "hybrid"
-            entity_extractor: EntityExtractor instance
-            finbert_model: FinBERT model name
-            finbert_weight: Weight for FinBERT scores in hybrid mode (0-1)
-            rule_weight: Weight for rule-based scores in hybrid mode (0-1)
-        """
-        self.method = method
+        config = get_config()
+        self.method = method or config.sentiment_analysis.method
+        finbert_model = finbert_model or config.sentiment_analysis.finbert.model_name
         self.entity_extractor = entity_extractor or EntityExtractor()
+
+        if finbert_weight is None:
+            finbert_weight = config.sentiment_analysis.hybrid_weights.finbert_weight
+        if rule_weight is None:
+            rule_weight = config.sentiment_analysis.hybrid_weights.rule_weight
+        
         self.finbert_weight = finbert_weight
         self.rule_weight = rule_weight
         
-        # Initialize rule-based classifier (always available)
         self.rule_classifier = RuleBasedSentimentClassifier(
             entity_extractor=self.entity_extractor
         )
         
-        # Initialize FinBERT classifier (if available and needed)
         self.finbert_classifier = None
         if method in ["finbert", "hybrid"] and FINBERT_AVAILABLE:
             try:
@@ -98,24 +75,14 @@ class HybridSentimentClassifier:
         rule_result: Dict[str, Any],
         finbert_result: Dict[str, Any]
     ) -> float:
-        """
-        Calculate agreement between rule-based and FinBERT.
-        
-        Returns:
-            Agreement score (0-1), where 1 = perfect agreement
-        """
-        # Check if classifications match
+        """Returns agreement score (0-1) based on classification match and vector cosine similarity."""
         rule_class = rule_result["classification"]
         finbert_class = finbert_result["classification"]
         
         classification_match = 1.0 if rule_class == finbert_class else 0.0
         
-        # Check score distribution similarity
         rule_breakdown = rule_result["sentiment_breakdown"]
         finbert_breakdown = finbert_result["sentiment_breakdown"]
-        
-        # Calculate cosine similarity of score vectors
-        import math
         
         def cosine_similarity(vec1: Dict[str, float], vec2: Dict[str, float]) -> float:
             keys = ["bullish", "bearish", "neutral"]
@@ -133,7 +100,7 @@ class HybridSentimentClassifier:
         
         score_similarity = cosine_similarity(rule_breakdown, finbert_breakdown)
         
-        # Weighted combination
+        # Weighted combination: 60% hard match, 40% vector similarity
         agreement = 0.6 * classification_match + 0.4 * score_similarity
         
         return round(agreement, 3)
@@ -143,21 +110,12 @@ class HybridSentimentClassifier:
         rule_result: Dict[str, Any],
         finbert_result: Dict[str, Any]
     ) -> HybridSentimentResult:
-        """
-        Combine rule-based and FinBERT results using weighted averaging.
-        
-        Strategy:
-        - If both agree: High confidence, use weighted average
-        - If disagree: Lower confidence, favor FinBERT slightly
-        """
-        # Calculate agreement
+        """Merges results using weighted averaging; confidence is boosted by model agreement."""
         agreement = self._calculate_agreement_score(rule_result, finbert_result)
         
-        # Extract breakdowns
         rule_bd = rule_result["sentiment_breakdown"]
         finbert_bd = finbert_result["sentiment_breakdown"]
         
-        # Weighted combination of scores
         combined_scores = {
             "bullish": (
                 self.rule_weight * rule_bd["bullish"] +
@@ -173,7 +131,6 @@ class HybridSentimentClassifier:
             )
         }
         
-        # Determine classification from combined scores
         max_score = max(combined_scores.values())
         if combined_scores["bullish"] == max_score:
             classification = "Bullish"
@@ -182,14 +139,10 @@ class HybridSentimentClassifier:
         else:
             classification = "Neutral"
         
-        # Confidence is the max score, adjusted by agreement
-        base_confidence = max_score
+        # Agreement acts as a multiplier (0.9x to 1.1x) on base confidence
+        agreement_boost = 0.9 + (agreement * 0.2)
+        final_confidence = min(max_score * agreement_boost, 100.0)
         
-        # High agreement boosts confidence, low agreement reduces it
-        agreement_boost = 0.9 + (agreement * 0.2)  # Range: 0.9-1.1
-        final_confidence = min(base_confidence * agreement_boost, 100.0)
-        
-        # Signal strength combines both methods
         rule_signal = rule_result["signal_strength"]
         finbert_signal = finbert_result["signal_strength"]
         combined_signal = (
@@ -198,7 +151,6 @@ class HybridSentimentClassifier:
         ) * agreement_boost
         combined_signal = min(combined_signal, 100.0)
         
-        # Enhanced breakdown with metadata
         enhanced_breakdown = {
             **combined_scores,
             "agreement_score": agreement,
@@ -220,46 +172,28 @@ class HybridSentimentClassifier:
         )
     
     def analyze_sentiment(self, article: NewsArticle) -> Dict[str, Any]:
-        """
-        Analyze sentiment using configured method.
-        
-        Args:
-            article: NewsArticle to analyze
-        
-        Returns:
-            Dictionary with sentiment analysis results
-        """
+        """Analyzes article using rule-based, FinBERT, or hybrid approach depending on config."""
         if self.method == "rule_based":
-            # Use rule-based only
-            result = self.rule_classifier.analyze_sentiment(article)
-            return result
+            return self.rule_classifier.analyze_sentiment(article)
         
         elif self.method == "finbert":
-            # Use FinBERT only
             if self.finbert_classifier is None:
-                # Fallback to rule-based
                 result = self.rule_classifier.analyze_sentiment(article)
                 result["analysis_method"] = "rule_based_fallback"
                 return result
             
-            result = self.finbert_classifier.analyze_sentiment(article)
-            return result
+            return self.finbert_classifier.analyze_sentiment(article)
         
-        else:  # method == "hybrid"
-            # Use both and combine
+        else:  # hybrid
             rule_result = self.rule_classifier.analyze_sentiment(article)
             
             if self.finbert_classifier is None:
-                # Fallback to rule-based
                 rule_result["analysis_method"] = "rule_based_fallback"
                 return rule_result
             
             finbert_result = self.finbert_classifier.analyze_sentiment(article)
-            
-            # Combine results
             hybrid_result = self._combine_results(rule_result, finbert_result)
             
-            # Convert to dict format
             return {
                 "classification": hybrid_result.classification,
                 "confidence_score": hybrid_result.confidence_score,
@@ -270,15 +204,7 @@ class HybridSentimentClassifier:
             }
     
     def analyze_and_attach(self, article: NewsArticle) -> NewsArticle:
-        """
-        Analyze sentiment and attach to article.
-        
-        Args:
-            article: NewsArticle to process
-        
-        Returns:
-            Article with sentiment data attached
-        """
+        """Runs analysis and updates the article object with sentiment data."""
         result = self.analyze_sentiment(article)
         
         sentiment_data = SentimentData(
@@ -290,11 +216,9 @@ class HybridSentimentClassifier:
         )
         
         article.set_sentiment(sentiment_data)
-        
         return article
     
     def get_method_info(self) -> Dict[str, Any]:
-        """Get information about active sentiment analysis method"""
         return {
             "configured_method": self.method,
             "rule_based_available": True,
@@ -304,4 +228,3 @@ class HybridSentimentClassifier:
                 "finbert": self.finbert_weight
             } if self.method == "hybrid" else None
         }
-

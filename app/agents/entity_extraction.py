@@ -6,6 +6,7 @@ import re
 from typing import Dict, List, Union, Optional, Set, Tuple
 from dataclasses import dataclass, asdict
 from app.core.models import NewsArticle
+from app.core.config_loader import get_config
 
 try:
     import spacy
@@ -29,32 +30,35 @@ class EntityExtractor:
         alias_path: Optional[Union[str, Path]] = None,
         sector_path: Optional[Union[str, Path]] = None,
         regulator_path: Optional[Union[str, Path]] = None,
-        model_name: str = "en_core_web_sm",
+        model_name: str = None,
         event_keywords: Optional[List[str]] = None,
     ):
+        config = get_config()
+    
+        model_name = model_name or config.entity_extraction.spacy_model
+        event_keywords = event_keywords or config.entity_extraction.event_keywords
+
         alias_path = Path(alias_path) if alias_path else Paths.COMPANY_ALIASES
         sector_path = Path(sector_path) if sector_path else Paths.SECTOR_TICKERS
         regulator_path = Path(regulator_path) if regulator_path else Paths.REGULATORS
 
-        # Loading company aliases
         self.alias_table = {}
         if alias_path.exists():
             self.alias_table = json.loads(alias_path.read_text())
         
-        # Building reverse lookup: alias -> canonical name
+        # Reverse lookup: alias -> canonical name
         self.alias_to_canonical = {}
         for canonical, meta in self.alias_table.items():
             for alias in meta.get("aliases", [canonical]):
                 self.alias_to_canonical[alias.lower()] = canonical
 
-        # Loading sector tickers
         self.sector_tickers = {}
         if sector_path.exists():
             self.sector_tickers = json.loads(sector_path.read_text())
 
-        # Load regulators - create bidirectional mapping
-        self.regulator_map = {}  # alias -> canonical
-        self.canonical_regulators = set()  # all canonical regulator names
+        # Regulator bidirectional mapping
+        self.regulator_map = {}
+        self.canonical_regulators = set()
         if regulator_path.exists():
             reg_data = json.loads(regulator_path.read_text())
             for canonical, aliases in reg_data.items():
@@ -62,7 +66,6 @@ class EntityExtractor:
                 for alias in aliases:
                     self.regulator_map[alias.lower()] = canonical
 
-        # Event keywords (lowercased)
         self.event_keywords = [k.lower() for k in (event_keywords or [
             "dividend", "buyback", "stock buyback", "merger", "acquisition", 
             "ipo", "rates", "repo rate", "interest rate", "policy rate",
@@ -75,12 +78,11 @@ class EntityExtractor:
             "working capital", "cash flow", "free cash flow"
         ])]
 
-        # spaCy loading with graceful degradation
         self.nlp = None
         self.use_transformer = False
         
+        # Load spaCy (Priority: Transformer -> Small -> Blank)
         if SPACY_AVAILABLE:
-            # Try transformer model first, then small, then blank
             for model in [model_name, "en_core_web_sm", "en_core_web_lg"]:
                 try:
                     self.nlp = spacy.load(model)
@@ -89,11 +91,10 @@ class EntityExtractor:
                 except Exception:
                     continue
             
-            # Fallback to blank if all else fails
             if self.nlp is None:
                 self.nlp = spacy.blank("en")
 
-        # PhraseMatcher for precise alias detection
+        # Setup PhraseMatcher for precise alias detection
         self.matcher = None
         if self.nlp is not None and self.alias_table:
             try:
@@ -106,16 +107,14 @@ class EntityExtractor:
                 pass
 
     def _as_text(self, item: Union[NewsArticle, str]) -> str:
-        """Convert input to text string"""
         if isinstance(item, NewsArticle):
             return f"{item.title}. {item.content}"
         return item
 
     def _normalize_company_name(self, name: str) -> Optional[str]:
-        """Map any company mention to canonical name"""
+        """Map mention to canonical name, handling prefixes and exact matches."""
         normalized = name.strip()
         
-        # Remove common prefixes
         for prefix in ["the ", "The "]:
             if normalized.startswith(prefix):
                 normalized = normalized[len(prefix):]
@@ -124,32 +123,29 @@ class EntityExtractor:
         if canonical:
             return canonical
         
-        # Try partial matching for known companies (more conservative)
+        # Conservative partial matching
         normalized_lower = normalized.lower()
         for alias, canon in self.alias_to_canonical.items():
-            # Only match if the alias is a complete word match
             if normalized_lower == alias:
                 return canon
         
-        return normalized  # Return as-is if no mapping found
+        return normalized
 
     def _extract_regulators(self, text: str) -> Set[Tuple[str, float, str]]:
-        """Extract regulators with confidence scores"""
         regulators = set()
         lower_text = text.lower()
         
         for alias, canonical in self.regulator_map.items():
-            # Word boundary matching for precision
             pattern = rf"\b{re.escape(alias)}\b"
             if re.search(pattern, lower_text):
-                # Higher confidence for exact canonical name matches
+                # Higher confidence for exact canonical matches
                 confidence = 1.0 if alias == canonical.lower() else 0.95
                 regulators.add((canonical, confidence, "regex"))
         
         return regulators
 
     def _extract_companies_matcher(self, doc) -> Set[Tuple[str, float, str]]:
-        """Extracting companies using PhraseMatcher (highest precision)"""
+        """PhraseMatcher extraction (highest precision)."""
         companies = set()
         
         if self.matcher is None:
@@ -158,11 +154,9 @@ class EntityExtractor:
         matched_spans = set()
         for match_id, start, end in self.matcher(doc):
             canonical = self.nlp.vocab.strings[match_id]
-            
-            # Verify this is a valid word-boundary match
             span_text = doc[start:end].text
             
-            # Additional validation: check if this matched text is a known alias
+            # Double-check against known aliases for validity
             is_valid = False
             for alias in self.alias_table[canonical].get("aliases", [canonical]):
                 if span_text.lower() == alias.lower():
@@ -176,47 +170,42 @@ class EntityExtractor:
         return companies
 
     def _extract_companies_ner(self, doc) -> Set[Tuple[str, float, str]]:
-        """Extract companies using spaCy NER"""
+        """SpaCy NER extraction with regulator filtering."""
         companies = set()
         
         for ent in getattr(doc, "ents", []):
             if ent.label_ == "ORG":
-                # Normalize to canonical name
                 canonical = self._normalize_company_name(ent.text)
                 
-                # Skip if it's actually a regulator
                 if canonical in self.canonical_regulators:
                     continue
                 if canonical.lower() in self.regulator_map:
                     continue
                 
-                # Lower confidence for NER-only matches
                 confidence = 0.85 if self.use_transformer else 0.75
                 companies.add((canonical, confidence, "ner"))
         
         return companies
 
     def _extract_companies_regex(self, text: str) -> Set[Tuple[str, float, str]]:
-        """Regex-based company detection with strict word boundaries"""
+        """Strict word-boundary regex fallback."""
         companies = set()
         
         for canonical, meta in self.alias_table.items():
             for alias in meta.get("aliases", [canonical]):
-                # Using \b for word boundaries to avoid partial matches
                 pattern = rf"\b{re.escape(alias)}\b"
                 if re.search(pattern, text, flags=re.IGNORECASE):
                     companies.add((canonical, 0.95, "regex"))
-                    break  # Found this company, move to next
+                    break 
         
         return companies
 
     def _extract_people(self, doc) -> Set[str]:
-        """Extract person names from NER"""
         people = set()
         
         for ent in getattr(doc, "ents", []):
             if ent.label_ == "PERSON":
-                # Filter out single-word names (often false positives)
+                # Filter single-word names to reduce false positives
                 name = ent.text.strip()
                 if len(name.split()) >= 2:
                     people.add(name)
@@ -238,14 +227,12 @@ class EntityExtractor:
     def _extract_sectors_explicit(self, text: str) -> Set[str]:
         sectors = set()
         
-        # Create word boundary patterns for multi-word sectors
         for sector in self.sector_tickers.keys():
-            # Handle both "Banking" and "banking sector"
             patterns = [
                 rf"\b{re.escape(sector)}\b",
                 rf"\b{re.escape(sector.lower())} sector\b",
             ]
-            # This ensures "Semiconductors" key matches "semiconductor" in text
+            # Handle singular forms (e.g., "Semiconductors" -> "semiconductor")
             if sector.endswith('s'):
                 singular = sector[:-1]
                 patterns.append(rf"\b{re.escape(singular)}\b")
@@ -263,7 +250,6 @@ class EntityExtractor:
         lower_text = text.lower()
         
         for keyword in self.event_keywords:
-            # Word boundary matching
             pattern = rf"\b{re.escape(keyword)}\b"
             if re.search(pattern, lower_text):
                 events.add(keyword)
@@ -271,7 +257,7 @@ class EntityExtractor:
         return events
 
     def _merge_entities_with_confidence(self, entities_with_conf: Set[Tuple[str, float, str]]) -> List[str]:
-        """Merge duplicate entities, keeping highest confidence version"""
+        """Deduplicate entities, keeping highest confidence source."""
         entity_map = {}
         
         for entity, confidence, source in entities_with_conf:
@@ -286,14 +272,7 @@ class EntityExtractor:
         return_confidence: bool = False
     ) -> Union[Dict[str, List[str]], Dict[str, List[EntityConfidence]]]:
         """
-        Extract entities from text
-        
-        Args:
-            item: NewsArticle or text string
-            return_confidence: If True, return EntityConfidence objects with scores
-        
-        Returns:
-            Dictionary of entity types to lists of entities (or EntityConfidence objects)
+        Extract entities via pipeline: Matcher -> Regex -> NER.
         """
         text = self._as_text(item)
         
@@ -305,23 +284,20 @@ class EntityExtractor:
 
         regulators_with_conf = self._extract_regulators(text)
 
-        # Extract companies using multiple methods
         if self.nlp is not None:
             doc = self.nlp(text)
             
-            # Method 1: PhraseMatcher (highest precision)
+            # 1. Precise Matcher
             matcher_companies = self._extract_companies_matcher(doc)
             companies_with_conf.update(matcher_companies)
             
-            # Method 2: Regex (high precision with word boundaries)
-            # Only use if matcher didn't find much
+            # 2. Regex Fallback (if insufficient matches)
             if len(matcher_companies) < 2:
                 regex_companies = self._extract_companies_regex(text)
                 companies_with_conf.update(regex_companies)
             
-            # Method 3: NER (good recall, but only if we haven't found via other methods)
+            # 3. NER (Catch-all for unknown entities)
             ner_companies = self._extract_companies_ner(doc)
-            # Only add NER results that weren't found by matcher/regex
             existing_company_names = {c for c, _, _ in companies_with_conf}
             for company, conf, source in ner_companies:
                 if company not in existing_company_names:
@@ -331,27 +307,19 @@ class EntityExtractor:
         else:
             companies_with_conf = self._extract_companies_regex(text)
 
-        # Merge companies, removing duplicates and regulator conflicts
+        # Merge and remove regulator conflicts
         companies_raw = self._merge_entities_with_confidence(companies_with_conf)
-        
-        # removing any companies that are actually regulators
         regulator_names = {reg for reg, _, _ in regulators_with_conf}
         companies = [c for c in companies_raw if c not in regulator_names]
 
-        # Extract sectors
-        # 1. Infer from companies
+        # Extract Sectors and Events
         sectors.update(self._infer_sectors_from_companies(set(companies)))
-        # 2. Explicit sector mentions
         sectors.update(self._extract_sectors_explicit(text))
-
-        # Extract events
         events = self._extract_events(text)
 
-        # Format output
         regulators = self._merge_entities_with_confidence(regulators_with_conf)
         
         if return_confidence:
-            # Return with confidence scores
             return {
                 "Companies": [
                     EntityConfidence(entity=e, entity_type="Company", confidence=c, source=s)
@@ -375,7 +343,6 @@ class EntityExtractor:
                 ],
             }
         else:
-            # Return simple lists 
             return {
                 "Companies": companies,
                 "Sectors": sorted(sectors),
@@ -383,4 +350,3 @@ class EntityExtractor:
                 "People": sorted(people),
                 "Events": sorted(events),
             }
-

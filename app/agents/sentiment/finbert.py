@@ -1,8 +1,8 @@
-
 from typing import Dict, Any, Optional, Tuple
 from dataclasses import dataclass
 from app.core.models import NewsArticle, SentimentData
 from app.agents.entity_extraction import EntityExtractor
+from app.core.config_loader import get_config
 
 try:
     from transformers import AutoTokenizer, AutoModelForSequenceClassification
@@ -19,7 +19,7 @@ class FinBERTScore:
     neutral: float
     
     def to_bullish_bearish_neutral(self) -> Dict[str, float]:
-        """Convert FinBERT labels to our domain labels (0-100 scale)"""
+        """Convert FinBERT raw probs to domain-specific percentage (0-100)."""
         return {
             "bullish": round(self.positive * 100, 2),
             "bearish": round(self.negative * 100, 2),
@@ -29,33 +29,27 @@ class FinBERTScore:
 
 class FinBERTSentimentClassifier:
     
-    def __init__(
-        self,
-        model_name: str = "ProsusAI/finbert",
-        entity_extractor: Optional[EntityExtractor] = None,
-        device: Optional[str] = None
-    ):
+    def __init__(self, model_name: str = None, entity_extractor: Optional[EntityExtractor] = None, device: Optional[str] = None):
+        config = get_config()
         if not FINBERT_AVAILABLE:
-            raise ImportError(
-                "FinBERT requires transformers and torch. "
-                "Install with: pip install transformers torch"
-            )
+            raise ImportError("FinBERT requires transformers and torch.")
         
-        self.model_name = model_name
         self.entity_extractor = entity_extractor or EntityExtractor()
+        self.model_name = model_name or config.sentiment_analysis.finbert.model_name
+        device = device or config.sentiment_analysis.finbert.device
         
         if device is None:
             self.device = "cuda" if torch.cuda.is_available() else "cpu"
         else:
             self.device = device
         
-        print(f"Loading FinBERT model: {model_name} on {self.device}...")
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-        self.model = AutoModelForSequenceClassification.from_pretrained(model_name)
+        print(f"Loading FinBERT model: {self.model_name} on {self.device}...")
+        self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
+        self.model = AutoModelForSequenceClassification.from_pretrained(self.model_name)
         self.model.to(self.device)
-        self.model.eval()  # Set to evaluation mode
+        self.model.eval()
         
-        # Label mapping (FinBERT uses: positive, negative, neutral)
+        # FinBERT defaults: 0=positive, 1=negative, 2=neutral
         self.id2label = {0: "positive", 1: "negative", 2: "neutral"}
     
     def _predict_sentiment(self, text: str, max_length: int = 512) -> FinBERTScore:
@@ -67,19 +61,16 @@ class FinBERTSentimentClassifier:
             max_length=max_length
         )
         
-        # Move to device
         inputs = {k: v.to(self.device) for k, v in inputs.items()}
         
-        # Run inference
         with torch.no_grad():
             outputs = self.model(**inputs)
             logits = outputs.logits
         
-        # Apply softmax to get probabilities
+        # Apply softmax and move to CPU for processing
         probs = torch.nn.functional.softmax(logits, dim=-1)
-        probs = probs.cpu().numpy()[0]  # Move to CPU and get first batch
+        probs = probs.cpu().numpy()[0]
         
-        # Map to labels (FinBERT order: positive=0, negative=1, neutral=2)
         return FinBERTScore(
             positive=float(probs[0]),
             negative=float(probs[1]),
@@ -94,43 +85,31 @@ class FinBERTSentimentClassifier:
             return self.entity_extractor.extract_entities(article)
         
         return {
-            "Companies": [],
-            "Sectors": [],
-            "Regulators": [],
-            "People": [],
-            "Events": []
+            "Companies": [], "Sectors": [], "Regulators": [], "People": [], "Events": []
         }
     
     def _calculate_entity_boost(self, entities: Dict[str, Any]) -> float:
         boost = 1.0
         
-        # Company mentions increase confidence
+        # Increase confidence based on relevant entity presence
         companies = entities.get("Companies", [])
         if companies:
             boost += len(companies) * 0.05
         
-        # Regulatory mentions increase confidence
-        regulators = entities.get("Regulators", [])
-        if regulators:
+        if entities.get("Regulators", []):
             boost += 0.1
         
-        # Event keywords increase confidence
         events = entities.get("Events", [])
         if events:
             boost += len(events) * 0.05
         
-        return min(boost, 1.5)  # Cap at 1.5x
+        return min(boost, 1.5)  # Cap boost at 1.5x
     
-    def _classify_from_scores(
-        self,
-        scores: Dict[str, float]
-    ) -> Tuple[str, float]:
-
+    def _classify_from_scores(self, scores: Dict[str, float]) -> Tuple[str, float]:
         bullish = scores["bullish"]
         bearish = scores["bearish"]
         neutral = scores["neutral"]
         
-        # Determine winner
         if bullish > bearish and bullish > neutral:
             classification = "Bullish"
             confidence = bullish
@@ -141,42 +120,34 @@ class FinBERTSentimentClassifier:
             classification = "Neutral"
             confidence = neutral
         
-        # Adjust confidence based on margin
+        # Adjust confidence based on the margin between the top two scores
         max_score = max(bullish, bearish, neutral)
         second_max = sorted([bullish, bearish, neutral])[-2]
         margin = max_score - second_max
         
-        # Higher margin = higher confidence
         confidence_multiplier = 1.0 + (margin / 100.0)
         final_confidence = min(confidence * confidence_multiplier, 100.0)
         
         return classification, final_confidence
     
     def analyze_sentiment(self, article: NewsArticle) -> Dict[str, Any]:
-        # Combine title and content (title weighted more)
         text = f"{article.title}. {article.content}"
         
-        # Truncate if too long (FinBERT max = 512 tokens ≈ 400 words)
+        # Truncate strictly to avoid tokenizer errors (FinBERT limit ~512 tokens)
         if len(text) > 2000:
             text = text[:2000]
         
-        # Run FinBERT inference
         finbert_scores = self._predict_sentiment(text)
-        
-        # Convert to 0-100 scale with our labels
         normalized_scores = finbert_scores.to_bullish_bearish_neutral()
         
-        # Extract entities for context boosting
         entities = self._extract_entities_from_article(article)
         entity_boost = self._calculate_entity_boost(entities)
         
-        # Classify sentiment
         classification, confidence_score = self._classify_from_scores(normalized_scores)
         
-        # Calculate signal strength (confidence * entity boost)
+        # Signal strength combines raw confidence with entity context relevance
         signal_strength = min(confidence_score * entity_boost, 100.0)
         
-        # Build detailed breakdown
         sentiment_breakdown = {
             "bullish": normalized_scores["bullish"],
             "bearish": normalized_scores["bearish"],
@@ -196,7 +167,6 @@ class FinBERTSentimentClassifier:
         }
     
     def analyze_and_attach(self, article: NewsArticle) -> NewsArticle:
-    
         result = self.analyze_sentiment(article)
         
         sentiment_data = SentimentData(
@@ -208,6 +178,4 @@ class FinBERTSentimentClassifier:
         )
         
         article.set_sentiment(sentiment_data)
-        
         return article
-
