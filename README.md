@@ -7,7 +7,6 @@
 
 > **Winner Solution for Tradl AI/ML & FinTech Hackathon** - A production-ready multi-agent system that transforms how traders and investors consume financial news through intelligent deduplication, entity extraction, sentiment analysis, and supply chain impact mapping.
 
-![MarketMuni Architecture](https://via.placeholder.com/1200x400/1a1a2e/16c79a?text=MarketMuni+Architecture)
 
 ---
 
@@ -167,29 +166,58 @@ Downstream Impacts (Supply Effects):
 
 ### LangGraph Multi-Agent Pipeline
 
-```mermaid
-graph LR
-    A[Ingestion Agent] --> B[Deduplication Agent]
-    B --> C[Entity Extraction Agent]
-    C --> D[Stock Impact Agent]
-    D --> E[Sentiment Analysis Agent]
-    E --> F[Cross-Impact Agent]
-    F --> G[Storage & Indexing Agent]
+graph TD
+    subgraph "External World"
+        News[Financial News Sources]
+        User[Trader / Investor]
+    end
+
+    subgraph "MarketMuni System"
+        API[FastAPI Gateway]
+        
+        subgraph "Ingestion Pipeline (LangGraph)"
+            Ingest[Ingestion Agent]
+            Dedup[Deduplication Agent]
+            Entity[Entity Extractor]
+            Impact[Stock Impact Mapper]
+            Senti[Sentiment Agent]
+            Cross[Cross-Impact Agent]
+        end
+        
+        subgraph "Query Engine"
+            QProc[Query Processor]
+            Strat[Strategy Selector]
+            Rerank[Sentiment Reranker]
+        end
+        
+        subgraph "Storage Layer"
+            VDB[(ChromaDB\nVector Store)]
+            SQL[(Metadata Store)]
+        end
+    end
+
+    News -->|JSON/RSS| API
+    User -->|Natural Language Query| API
     
-    H[Query Processor] --> I[Vector Search]
-    I --> J[Context Expansion]
-    J --> K[Multi-Strategy Ranking]
-    K --> L[Results]
+    API --> Ingest
+    Ingest --> Dedup
+    Dedup -->|Unique Article| Entity
+    Entity -->|Entities| Impact
+    Impact -->|Tickers| Senti
+    Senti -->|Signal| Cross
+    Cross -->|Upstream/Downstream| VDB & SQL
     
-    style A fill:#e1f5ff
-    style B fill:#fff4e1
-    style C fill:#ffe1f5
-    style D fill:#e1ffe1
-    style E fill:#f5e1ff
-    style F fill:#fff4e1
-    style G fill:#e1f5ff
-    style H fill:#ffe1e1
-```
+    API --> QProc
+    QProc --> Strat
+    Strat -->|Context Queries| VDB
+    VDB -->|Results| Rerank
+    Rerank -->|Ranked Response| API
+    
+    style API fill:#4B0082,stroke:#fff,color:#fff
+    style VDB fill:#2E8B57,stroke:#fff,color:#fff
+    style SQL fill:#2E8B57,stroke:#fff,color:#fff
+    style Ingest fill:#1E90FF,stroke:#fff,color:#fff
+    style QProc fill:#FF4500,stroke:#fff,color:#fff
 
 ### Data Flow
 
