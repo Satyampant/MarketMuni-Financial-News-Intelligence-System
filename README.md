@@ -266,7 +266,7 @@ graph TD
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/marketmuni.git
+git clone https://github.com/Satyampant/MarketMuni-Financial-News-Intelligence-System.git
 cd marketmuni
 
 # Create virtual environment with uv
@@ -283,14 +283,6 @@ python -m spacy download en_core_web_sm
 mkdir -p data/chroma_db
 
 # Run the server
-python run.py
-```
-
-### Alternative: Using pip
-
-```bash
-pip install -r requirements.txt
-python -m spacy download en_core_web_sm
 python run.py
 ```
 
