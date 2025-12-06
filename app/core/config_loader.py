@@ -105,6 +105,37 @@ class SupplyChainConfig:
 
 
 @dataclass
+class LLMModelsConfig:
+    """Alternative models for specific tasks."""
+    fast: str = "llama-3.1-8b-instant"
+    reasoning: str = "llama-3.3-70b-versatile"
+    structured: str = "llama-3.3-70b-versatile"
+
+
+@dataclass
+class LLMFeaturesConfig:
+    """Feature flags for LLM-based components."""
+    entity_extraction: bool = True
+    stock_mapping: bool = True
+    sentiment_analysis: bool = True
+    supply_chain: bool = True
+    query_expansion: bool = True
+
+
+@dataclass
+class LLMConfig:
+    """LLM configuration for Groq integration."""
+    provider: str = "groq"
+    model: str = "llama-3.3-70b-versatile"
+    temperature: float = 0.1
+    max_tokens: int = 4096
+    timeout: int = 30
+    max_retries: int = 3
+    models: LLMModelsConfig = field(default_factory=LLMModelsConfig)
+    features: LLMFeaturesConfig = field(default_factory=LLMFeaturesConfig)
+
+
+@dataclass
 class APIConfig:
     host: str = "0.0.0.0"
     port: int = 8000
@@ -154,6 +185,7 @@ class Config:
     query_processing: QueryProcessingConfig = field(default_factory=QueryProcessingConfig)
     stock_impact: StockImpactConfig = field(default_factory=StockImpactConfig)
     supply_chain: SupplyChainConfig = field(default_factory=SupplyChainConfig)
+    llm: LLMConfig = field(default_factory=LLMConfig)  # NEW: LLM configuration
     api: APIConfig = field(default_factory=APIConfig)
     resources: ResourcesConfig = field(default_factory=ResourcesConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
@@ -298,6 +330,41 @@ def load_config(config_path: Optional[Path] = None) -> Config:
                 traversal_depth=sc.get('traversal_depth', 1),
                 min_impact_score=sc.get('min_impact_score', 25.0),
                 weight_decay=sc.get('weight_decay', 0.8)
+            )
+        
+        # --- LLM Configuration (NEW) ---
+        if 'llm' in yaml_data:
+            llm = yaml_data['llm']
+            
+            models_config = LLMModelsConfig()
+            if 'models' in llm:
+                m = llm['models']
+                models_config = LLMModelsConfig(
+                    fast=m.get('fast', 'llama-3.1-8b-instant'),
+                    reasoning=m.get('reasoning', 'llama-3.3-70b-versatile'),
+                    structured=m.get('structured', 'llama-3.3-70b-versatile')
+                )
+            
+            features_config = LLMFeaturesConfig()
+            if 'features' in llm:
+                f = llm['features']
+                features_config = LLMFeaturesConfig(
+                    entity_extraction=f.get('entity_extraction', True),
+                    stock_mapping=f.get('stock_mapping', True),
+                    sentiment_analysis=f.get('sentiment_analysis', True),
+                    supply_chain=f.get('supply_chain', True),
+                    query_expansion=f.get('query_expansion', True)
+                )
+            
+            config.llm = LLMConfig(
+                provider=llm.get('provider', 'groq'),
+                model=llm.get('model', 'llama-3.3-70b-versatile'),
+                temperature=llm.get('temperature', 0.1),
+                max_tokens=llm.get('max_tokens', 4096),
+                timeout=llm.get('timeout', 30),
+                max_retries=llm.get('max_retries', 3),
+                models=models_config,
+                features=features_config
             )
         
         # --- API ---
