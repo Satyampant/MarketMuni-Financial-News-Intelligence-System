@@ -28,6 +28,17 @@ class RelationshipType(str, Enum):
     DOWNSTREAM_SUPPLY_IMPACT = "downstream_supply_impact"
 
 
+class QueryIntent(str, Enum):
+    """Query routing strategy types."""
+    DIRECT_ENTITY = "direct_entity"
+    SECTOR_WIDE = "sector_wide"
+    REGULATORY = "regulatory"
+    SENTIMENT_DRIVEN = "sentiment_driven"
+    CROSS_IMPACT = "cross_impact"
+    SEMANTIC_SEARCH = "semantic_search"
+    TEMPORAL = "temporal"
+
+
 # ENTITY EXTRACTION SCHEMAS
 
 class CompanyEntity(BaseModel):
@@ -173,6 +184,75 @@ class SupplyChainImpactSchema(BaseModel):
     reasoning: str = Field(...,description="Overall reasoning for supply chain impact assessment")
     confidence_score: float = Field(...,ge=0.0,le=1.0,description="Overall confidence in supply chain analysis")
     total_sectors_impacted: int = Field(...,ge=0,description="Total number of sectors identified as impacted")
+
+
+# QUERY ROUTER SCHEMA
+
+class QueryRouterSchema(BaseModel):
+    """
+    Query routing schema for LLM-based query understanding.
+    Determines optimal search strategy and extracts relevant entities.
+    """
+    strategy: QueryIntent = Field(..., description="Primary search strategy to execute")
+    entities: List[str] = Field(
+        default_factory=list,
+        description="Company names identified in query"
+    )
+    stock_symbols: List[str] = Field(
+        default_factory=list,
+        description="Stock ticker symbols extracted or inferred"
+    )
+    sectors: List[str] = Field(
+        default_factory=list,
+        description="Industry sectors mentioned or implied"
+    )
+    regulators: List[str] = Field(
+        default_factory=list,
+        description="Regulatory bodies mentioned in query"
+    )
+    sentiment_filter: Optional[str] = Field(
+        None,
+        description="Sentiment filter: Bullish, Bearish, or Neutral"
+    )
+    temporal_scope: Optional[str] = Field(
+        None,
+        description="Time scope: recent, last_week, last_month, etc."
+    )
+    refined_query: str = Field(
+        ...,
+        description="Optimized semantic search query for vector retrieval"
+    )
+    confidence: float = Field(
+        ...,
+        ge=0.0,
+        le=1.0,
+        description="Confidence in routing decision (0.0-1.0)"
+    )
+    reasoning: str = Field(
+        ...,
+        description="Explanation for why this strategy was chosen"
+    )
+    
+    @field_validator('sentiment_filter')
+    @classmethod
+    def validate_sentiment_filter(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None:
+            valid_sentiments = ["Bullish", "Bearish", "Neutral"]
+            if v not in valid_sentiments:
+                raise ValueError(f"Sentiment filter must be one of {valid_sentiments}")
+        return v
+    
+    @field_validator('entities', 'stock_symbols', 'sectors', 'regulators')
+    @classmethod
+    def validate_list_fields(cls, v: List[str]) -> List[str]:
+        return [item.strip() for item in v if item and len(item.strip()) > 0]
+    
+    @field_validator('refined_query')
+    @classmethod
+    def validate_refined_query(cls, v: str) -> str:
+        if not v or len(v.strip()) < 3:
+            raise ValueError("Refined query must be at least 3 characters")
+        return v.strip()
 
 
 # DEDUPLICATION SCHEMA
