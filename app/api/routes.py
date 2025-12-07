@@ -1,6 +1,6 @@
 """
-Updated app/api/routes.py - Full LLM Approach
-Uses LLM for both entity extraction and stock impact mapping.
+Updated app/api/routes.py - Full LLM Pipeline with LLM Sentiment Analysis
+Uses LLM for entity extraction, stock impact mapping, and sentiment analysis.
 """
 
 from fastapi import APIRouter, HTTPException, Query
@@ -16,7 +16,8 @@ from app.services.storage import NewsStorage
 from app.services.vector_store import VectorStore
 from app.agents.deduplication import DeduplicationAgent
 from app.agents.llm_entity_extractor import LLMEntityExtractor
-from app.agents.llm_stock_mapper import LLMStockImpactMapper  # NEW: LLM stock mapper
+from app.agents.llm_stock_mapper import LLMStockImpactMapper
+from app.agents.llm_sentiment import LLMSentimentAnalyzer  # NEW: LLM sentiment
 from app.agents.supply_chain import SupplyChainImpactMapper
 from app.workflows.graph import NewsIntelligenceGraph
 from app.core.config import Paths
@@ -40,9 +41,15 @@ entity_extractor = LLMEntityExtractor(
     enable_caching=config.performance.cache_embeddings
 )
 
-# NEW: LLM stock impact mapper
+# LLM stock impact mapper
 print("✓ Initializing LLM-based stock impact mapper")
 stock_mapper = LLMStockImpactMapper()
+
+# NEW: LLM sentiment analyzer
+print("✓ Initializing LLM-based sentiment analyzer")
+sentiment_analyzer = LLMSentimentAnalyzer(
+    use_entity_context=True
+)
 
 supply_chain_mapper = SupplyChainImpactMapper()
 
@@ -52,9 +59,9 @@ news_graph = NewsIntelligenceGraph(
     vector_store=vector_store,
     dedup_agent=dedup_agent,
     entity_extractor=entity_extractor,
-    stock_mapper=stock_mapper,  # NEW: LLM mapper
-    supply_chain_mapper=supply_chain_mapper,
-    sentiment_method=config.sentiment_analysis.method
+    stock_mapper=stock_mapper,
+    sentiment_analyzer=sentiment_analyzer 
+    supply_chain_mapper=supply_chain_mapper
 )
 
 @router.get("/", tags=["General"])
@@ -64,8 +71,8 @@ async def root():
         "version": "2.0.0",
         "features": {
             "entity_extraction": "llm",
-            "stock_impact_mapping": "llm",  # NEW
-            "sentiment_analysis": config.sentiment_analysis.method,
+            "stock_impact_mapping": "llm",
+            "sentiment_analysis": "llm",  # UPDATED
             "deduplication": "semantic",
             "supply_chain_analysis": "enabled"
         },
@@ -97,6 +104,10 @@ async def health_check():
                 "cache_enabled": cache_stats.get("cache_enabled", False)
             },
             "stock_impact_mapping": {
+                "method": "llm",
+                "status": "operational"
+            },
+            "sentiment_analysis": {
                 "method": "llm",
                 "status": "operational"
             }
@@ -154,7 +165,7 @@ async def ingest_article(article_input: ArticleInput):
     Ingest a financial news article with full LLM pipeline.
     - LLM entity extraction (companies with tickers, sectors, regulators, events)
     - LLM stock impact mapping with reasoning
-    - Sentiment analysis
+    - LLM sentiment analysis with key factors
     - Supply chain impact analysis
     """
     try:
@@ -199,6 +210,8 @@ async def ingest_article(article_input: ArticleInput):
                 "avg_company_confidence": stats.get("avg_company_confidence"),
                 "extraction_reasoning": stats.get("extraction_reasoning"),
                 "stock_impact_method": stats.get("stock_impact_method", "llm"),
+                "sentiment_method": stats.get("sentiment_method", "llm"),
+                "sentiment_key_factors_count": stats.get("sentiment_key_factors_count", 0),
                 "overall_market_impact": stats.get("overall_market_impact")
             }
         )
@@ -296,6 +309,13 @@ async def get_article(article_id: str):
             "sector_impacts": sum(1 for s in article.impacted_stocks if s["impact_type"] == "sector"),
             "regulatory_impacts": sum(1 for s in article.impacted_stocks if s["impact_type"] == "regulatory")
         }
+    
+    # Add sentiment key factors if available
+    if sentiment_dict:
+        sentiment_breakdown = sentiment_dict.get("sentiment_breakdown", {})
+        key_factors = sentiment_breakdown.get("key_factors", [])
+        if key_factors:
+            response_data["sentiment_key_factors"] = key_factors
     
     return response_data
 

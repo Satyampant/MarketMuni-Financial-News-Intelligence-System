@@ -1,14 +1,14 @@
 # MarketMuni Configuration - Financial News Intelligence System
 
 # ----------------------------------------------------------------------------
-# REDIS CACHE (NEW)
+# REDIS CACHE
 # ----------------------------------------------------------------------------
 redis:
   enabled: true
   host: "localhost"
   port: 6379
   db: 0
-  password: password  # Set via REDIS_PASSWORD env var in production
+  password: null  # Set via REDIS_PASSWORD env var in production
   ttl_seconds: 86400  # 24 hours
   connection_pool:
     max_connections: 50
@@ -39,27 +39,14 @@ entity_extraction:
     - "earnings"
 
 # ----------------------------------------------------------------------------
-# SENTIMENT ANALYSIS
+# SENTIMENT ANALYSIS (UPDATED FOR LLM)
 # ----------------------------------------------------------------------------
 sentiment_analysis:
-  method: "hybrid"
-  hybrid_weights:
-    finbert_weight: 0.4
-    rule_weight: 0.6
-  finbert:
-    model_name: "ProsusAI/finbert"
-    device: null
-  rule_based:
-    spacy_model: "en_core_web_sm"
-    use_spacy: true
-  entity_weights:
-    company: 1.3
-    sector: 1.1
-    regulator: 1.2
-  event_modifiers:
-    dividend: 1.3
-    buyback: 1.3
-    merger: 1.1
+  method: "llm"  # UPDATED: Now uses pure LLM approach  
+  
+  llm_sentiment:
+    use_entity_context: true  # Include entity context in prompts
+    few_shot_examples: true   # Use few-shot prompting
 
 # ----------------------------------------------------------------------------
 # VECTOR STORE
@@ -115,13 +102,13 @@ llm:
   
   models:
     fast: "llama-3.1-8b-instant"
-    reasoning: "llama-3.3-70b-versatile"
+    reasoning: "llama-3.3-70b-versatile"  # Used for sentiment analysis
     structured: "llama-3.3-70b-versatile"
   
   features:
     entity_extraction: true
     stock_mapping: true
-    sentiment_analysis: true
+    sentiment_analysis: true  # UPDATED: Now uses LLM
     supply_chain: true
     query_expansion: true
 
@@ -132,9 +119,9 @@ api:
   host: "0.0.0.0"
   port: 8000
   reload: true
-  workers: 4  # For production deployment
+  workers: 4
   title: "Financial News Intelligence API"
-  description: "Multi-agent AI system with Redis caching"
+  description: "Multi-agent AI system with full LLM pipeline"
   version: "2.0.0"
 
 resources:

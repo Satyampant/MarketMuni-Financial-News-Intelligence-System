@@ -1,6 +1,6 @@
 """
-Updated app/workflows/graph.py - With LLM Stock Impact Mapper
-Integrates LLM-based stock impact analysis into the pipeline.
+Updated app/workflows/graph.py - With LLM Sentiment Analysis
+Replaces hybrid sentiment approach with pure LLM-based analysis.
 """
 
 from typing import TypedDict, List, Annotated, Optional, Dict, Any
@@ -13,10 +13,10 @@ from app.core.models import NewsArticle
 from app.services.storage import NewsStorage
 from app.agents.deduplication import DeduplicationAgent
 from app.agents.llm_entity_extractor import LLMEntityExtractor
-from app.agents.llm_stock_mapper import LLMStockImpactMapper  # NEW: LLM stock mapper
+from app.agents.llm_stock_mapper import LLMStockImpactMapper
+from app.agents.llm_sentiment import LLMSentimentAnalyzer  # NEW: LLM sentiment
 from app.services.vector_store import VectorStore
 from app.agents.query_processor import QueryProcessor
-from app.agents.sentiment.hybrid import HybridSentimentClassifier
 from app.agents.supply_chain import SupplyChainImpactMapper
 from app.core.config_loader import get_config
 from app.core.llm_schemas import EntityExtractionSchema
@@ -27,7 +27,7 @@ class NewsIntelligenceState(TypedDict):
     articles: Annotated[List[NewsArticle], operator.add]
     current_article: Optional[NewsArticle]
     duplicates: Annotated[List[str], operator.add]
-    entities_schema: Optional[EntityExtractionSchema]  # NEW: Rich entity schema
+    entities_schema: Optional[EntityExtractionSchema]
     entities: Optional[dict]
     impacted_stocks: Optional[List[dict]]
     cross_impacts: Optional[List[Dict]]
@@ -42,7 +42,7 @@ class NewsIntelligenceState(TypedDict):
 class NewsIntelligenceGraph:
     """
     LangGraph-based multi-agent pipeline for financial news intelligence.
-    Fully LLM-powered approach for entity extraction and stock impact mapping.
+    Fully LLM-powered approach for entity extraction, stock impact, and sentiment analysis.
     """
     
     def __init__(
@@ -51,13 +51,11 @@ class NewsIntelligenceGraph:
         vector_store: VectorStore,
         dedup_agent: Optional[DeduplicationAgent] = None,
         entity_extractor: Optional[LLMEntityExtractor] = None,
-        stock_mapper: Optional[LLMStockImpactMapper] = None,  # NEW: LLM mapper
-        sentiment_agent: Optional[HybridSentimentClassifier] = None,
-        supply_chain_mapper: Optional[SupplyChainImpactMapper] = None,
-        sentiment_method: str = None
+        stock_mapper: Optional[LLMStockImpactMapper] = None,
+        sentiment_analyzer: Optional[LLMSentimentAnalyzer] = None,  # NEW: LLM sentiment
+        supply_chain_mapper: Optional[SupplyChainImpactMapper] = None
     ):
         config = get_config()
-        sentiment_method = sentiment_method or config.sentiment_analysis.method
 
         self.storage = storage
         self.vector_store = vector_store
@@ -69,27 +67,30 @@ class NewsIntelligenceGraph:
             enable_caching=config.performance.cache_embeddings
         )
         
-        # NEW: LLM stock impact mapper (replaces rule-based)
+        # LLM stock impact mapper
         self.stock_mapper = stock_mapper or LLMStockImpactMapper()
         
-        self.sentiment_agent = sentiment_agent or HybridSentimentClassifier(
-            method=sentiment_method,
-            entity_extractor=None
+        # NEW: LLM sentiment analyzer (replaces hybrid approach)
+        self.sentiment_analyzer = sentiment_analyzer or LLMSentimentAnalyzer(
+            use_entity_context=True
         )
         
         self.supply_chain_mapper = supply_chain_mapper or SupplyChainImpactMapper()
         
-        # Query processor (will be updated in future tasks)
+        # Query processor
         self.query_processor = QueryProcessor(
             vector_store=self.vector_store,
             entity_extractor=self.entity_extractor,
-            stock_mapper=self.stock_mapper  # Pass new mapper
+            stock_mapper=self.stock_mapper
         )
         
         self.app = self._build_ingestion_graph()
         self.query_app = self._build_query_graph()
         
-        print("✓ NewsIntelligenceGraph initialized with LLM stock impact mapper")
+        print("✓ NewsIntelligenceGraph initialized with full LLM pipeline")
+        print("  - Entity extraction: LLM")
+        print("  - Stock impact mapping: LLM")
+        print("  - Sentiment analysis: LLM")
     
     def _build_ingestion_graph(self):
         """Construct the main news ingestion and analysis pipeline."""
@@ -99,9 +100,9 @@ class NewsIntelligenceGraph:
         graph_builder.add_node("ingestion", self._ingestion_agent)
         graph_builder.add_node("deduplication", self._deduplication_agent)
         graph_builder.add_node("entity_extraction", self._entity_extraction_agent)
-        graph_builder.add_node("impact_mapper", self._impact_mapper_agent)  # UPDATED
+        graph_builder.add_node("impact_mapper", self._impact_mapper_agent)
+        graph_builder.add_node("sentiment_analysis", self._sentiment_analysis_agent)  # UPDATED
         graph_builder.add_node("cross_impact", self._cross_impact_agent)
-        graph_builder.add_node("sentiment_analysis", self._sentiment_analysis_agent)
         graph_builder.add_node("indexing", self._indexing_agent)
         
         # Edges
@@ -170,10 +171,7 @@ class NewsIntelligenceGraph:
         return {"duplicates": [], "stats": stats}
     
     def _entity_extraction_agent(self, state: NewsIntelligenceState) -> dict:
-        """
-        Extracts entities using LLM with structured output.
-        Stores rich EntityExtractionSchema with tickers and confidence scores.
-        """
+        """Extracts entities using LLM with structured output."""
         article = state["current_article"]
         
         # LLM extraction returns EntityExtractionSchema
@@ -205,16 +203,13 @@ class NewsIntelligenceGraph:
         
         return {
             "current_article": article,
-            "entities_schema": entities_schema,  # NEW: Pass rich schema
-            "entities": article.entities,  # Legacy format
+            "entities_schema": entities_schema,
+            "entities": article.entities,
             "stats": stats
         }
     
     def _impact_mapper_agent(self, state: NewsIntelligenceState) -> dict:
-        """
-        Maps extracted entities to specific stock tickers using LLM reasoning.
-        UPDATED: Now uses LLM-based stock impact mapper.
-        """
+        """Maps extracted entities to specific stock tickers using LLM reasoning."""
         article = state["current_article"]
         entities_schema = state["entities_schema"]
         
@@ -226,7 +221,7 @@ class NewsIntelligenceGraph:
             else:
                 raise ValueError("No entity schema available for impact mapping")
         
-        # NEW: LLM-based impact mapping
+        # LLM-based impact mapping
         impact_result = self.stock_mapper.map_to_stocks(entities_schema, article)
         
         # Convert to legacy format and attach to article
@@ -255,6 +250,44 @@ class NewsIntelligenceGraph:
         return {
             "current_article": article,
             "impacted_stocks": impact_dicts,
+            "stats": stats
+        }
+    
+    def _sentiment_analysis_agent(self, state: NewsIntelligenceState) -> dict:
+        """
+        Performs LLM-based sentiment analysis with entity context.
+        UPDATED: Uses LLMSentimentAnalyzer instead of hybrid approach.
+        """
+        article = state["current_article"]
+        entities_schema = state.get("entities_schema")
+        
+        # Reconstruct entity schema if not in state
+        if not entities_schema and hasattr(article, 'entities_rich') and article.entities_rich:
+            from app.core.llm_schemas import EntityExtractionSchema
+            entities_schema = EntityExtractionSchema.model_validate(article.entities_rich)
+        
+        # LLM sentiment analysis with entity context
+        self.sentiment_analyzer.analyze_and_attach(article, entities_schema)
+        sentiment_data = article.get_sentiment()
+        
+        stats = state.get("stats", {})
+        stats["sentiment_analyzed"] = True
+        
+        if sentiment_data:
+            stats.update({
+                "sentiment_classification": sentiment_data.classification,
+                "sentiment_confidence": sentiment_data.confidence_score,
+                "sentiment_signal_strength": sentiment_data.signal_strength,
+                "sentiment_method": sentiment_data.analysis_method
+            })
+            
+            # Extract key factors count
+            key_factors = sentiment_data.sentiment_breakdown.get("key_factors", [])
+            stats["sentiment_key_factors_count"] = len(key_factors)
+        
+        return {
+            "current_article": article,
+            "sentiment": sentiment_data.to_dict() if sentiment_data else None,
             "stats": stats
         }
     
@@ -304,33 +337,6 @@ class NewsIntelligenceGraph:
         return {
             "current_article": article,
             "cross_impacts": cross_impact_dicts,
-            "stats": stats
-        }
-    
-    def _sentiment_analysis_agent(self, state: NewsIntelligenceState) -> dict:
-        """Performs hybrid sentiment classification."""
-        article = state["current_article"]
-        
-        self.sentiment_agent.analyze_and_attach(article)
-        sentiment_data = article.get_sentiment()
-        
-        stats = state.get("stats", {})
-        stats["sentiment_analyzed"] = True
-        
-        if sentiment_data:
-            stats.update({
-                "sentiment_classification": sentiment_data.classification,
-                "sentiment_confidence": sentiment_data.confidence_score,
-                "sentiment_signal_strength": sentiment_data.signal_strength,
-                "sentiment_method": sentiment_data.analysis_method
-            })
-            
-            if "agreement_score" in sentiment_data.sentiment_breakdown:
-                stats["sentiment_agreement"] = sentiment_data.sentiment_breakdown["agreement_score"]
-        
-        return {
-            "current_article": article,
-            "sentiment": sentiment_data.to_dict() if sentiment_data else None,
             "stats": stats
         }
     
@@ -389,7 +395,7 @@ class NewsIntelligenceGraph:
             "articles": [],
             "current_article": article,
             "duplicates": [],
-            "entities_schema": None,  # NEW
+            "entities_schema": None,
             "entities": None,
             "impacted_stocks": None,
             "cross_impacts": None,
@@ -429,7 +435,6 @@ class NewsIntelligenceGraph:
         vector_count = self.vector_store.count()
         
         sentiment_stats = self.vector_store.get_sentiment_statistics()
-        sentiment_method_info = self.sentiment_agent.get_method_info()
         
         supply_chain_info = {
             "sectors_mapped": len(self.supply_chain_mapper.supply_chain_graph),
@@ -442,9 +447,12 @@ class NewsIntelligenceGraph:
         # Entity extraction stats
         entity_stats = self.entity_extractor.get_cache_stats()
         
-        # NEW: Stock impact stats
+        # Stock impact stats
         articles = self.storage.get_all_articles()
         stock_impact_stats = self.stock_mapper.get_impact_statistics(articles)
+        
+        # Sentiment statistics from analyzer
+        sentiment_analyzer_stats = self.sentiment_analyzer.get_sentiment_statistics(articles)
         
         return {
             "total_articles_stored": total_articles,
@@ -462,8 +470,9 @@ class NewsIntelligenceGraph:
                 "statistics": stock_impact_stats
             },
             "sentiment_analysis": {
-                "method": sentiment_method_info,
-                "statistics": sentiment_stats
+                "method": "llm",
+                "vector_store_stats": sentiment_stats,
+                "analyzer_stats": sentiment_analyzer_stats
             },
             "supply_chain_analysis": supply_chain_info,
             "status": "operational"
