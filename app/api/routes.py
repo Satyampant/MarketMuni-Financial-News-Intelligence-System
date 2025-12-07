@@ -1,6 +1,6 @@
 """
-Updated app/api/routes.py - Pure LLM Approach
-No conditional checks - always uses LLM entity extraction
+Updated app/api/routes.py - Full LLM Approach
+Uses LLM for both entity extraction and stock impact mapping.
 """
 
 from fastapi import APIRouter, HTTPException, Query
@@ -15,8 +15,8 @@ from app.api.schemas import (
 from app.services.storage import NewsStorage
 from app.services.vector_store import VectorStore
 from app.agents.deduplication import DeduplicationAgent
-from app.agents.llm_entity_extractor import LLMEntityExtractor  # LLM-only
-from app.agents.stock_impact import StockImpactMapper
+from app.agents.llm_entity_extractor import LLMEntityExtractor
+from app.agents.llm_stock_mapper import LLMStockImpactMapper  # NEW: LLM stock mapper
 from app.agents.supply_chain import SupplyChainImpactMapper
 from app.workflows.graph import NewsIntelligenceGraph
 from app.core.config import Paths
@@ -34,22 +34,25 @@ vector_store = VectorStore(
 
 dedup_agent = DeduplicationAgent()
 
-# LLM entity extraction (pure approach)
+# LLM entity extraction
 print("✓ Initializing LLM-based entity extraction")
 entity_extractor = LLMEntityExtractor(
     enable_caching=config.performance.cache_embeddings
 )
 
-stock_mapper = StockImpactMapper()
+# NEW: LLM stock impact mapper
+print("✓ Initializing LLM-based stock impact mapper")
+stock_mapper = LLMStockImpactMapper()
+
 supply_chain_mapper = SupplyChainImpactMapper()
 
-# Orchestrator setup with LLM extraction
+# Orchestrator setup with full LLM pipeline
 news_graph = NewsIntelligenceGraph(
     storage=storage,
     vector_store=vector_store,
     dedup_agent=dedup_agent,
     entity_extractor=entity_extractor,
-    stock_mapper=stock_mapper,
+    stock_mapper=stock_mapper,  # NEW: LLM mapper
     supply_chain_mapper=supply_chain_mapper,
     sentiment_method=config.sentiment_analysis.method
 )
@@ -61,6 +64,7 @@ async def root():
         "version": "2.0.0",
         "features": {
             "entity_extraction": "llm",
+            "stock_impact_mapping": "llm",  # NEW
             "sentiment_analysis": config.sentiment_analysis.method,
             "deduplication": "semantic",
             "supply_chain_analysis": "enabled"
@@ -71,7 +75,7 @@ async def root():
 @router.get("/health", tags=["General"])
 async def health_check():
     """
-    Comprehensive health check including Redis cache status.
+    Comprehensive health check including Redis cache and LLM services.
     """
     cache_stats = entity_extractor.get_cache_stats()
     
@@ -91,6 +95,10 @@ async def health_check():
                 "method": "llm",
                 "cache_type": cache_stats.get("cache_type", "none"),
                 "cache_enabled": cache_stats.get("cache_enabled", False)
+            },
+            "stock_impact_mapping": {
+                "method": "llm",
+                "status": "operational"
             }
         }
     }
@@ -111,7 +119,6 @@ async def health_check():
             "status": "unavailable",
             "message": "Redis not connected - using in-memory fallback"
         }
-        # Downgrade overall status if Redis is expected but unavailable
         if config.redis.enabled:
             health_status["status"] = "degraded"
     
@@ -120,9 +127,7 @@ async def health_check():
 
 @router.get("/cache/stats", tags=["Cache"])
 async def get_cache_stats():
-    """
-    Get detailed cache statistics.
-    """
+    """Get detailed cache statistics."""
     return entity_extractor.get_cache_stats()
 
 
@@ -146,8 +151,11 @@ async def clear_cache(article_id: Optional[str] = None):
 @router.post("/ingest", response_model=IngestResponse, tags=["Ingestion"])
 async def ingest_article(article_input: ArticleInput):
     """
-    Ingest a financial news article with LLM-based entity extraction.
-    Extracts companies with tickers, sectors, regulators, and events.
+    Ingest a financial news article with full LLM pipeline.
+    - LLM entity extraction (companies with tickers, sectors, regulators, events)
+    - LLM stock impact mapping with reasoning
+    - Sentiment analysis
+    - Supply chain impact analysis
     """
     try:
         article = NewsArticle(
@@ -173,7 +181,7 @@ async def ingest_article(article_input: ArticleInput):
         return IngestResponse(
             success=True,
             article_id=article.id,
-            message="Article processed successfully with LLM entity extraction",
+            message="Article processed successfully with full LLM pipeline",
             is_duplicate=stats.get("is_duplicate", False),
             duplicates_found=stats.get("duplicates_found", 0),
             entities_extracted=entities_stats,
@@ -189,7 +197,9 @@ async def ingest_article(article_input: ArticleInput):
                 "sentiment_analyzed": stats.get("sentiment_analyzed", False),
                 "tickers_extracted": stats.get("tickers_extracted", 0),
                 "avg_company_confidence": stats.get("avg_company_confidence"),
-                "extraction_reasoning": stats.get("extraction_reasoning")
+                "extraction_reasoning": stats.get("extraction_reasoning"),
+                "stock_impact_method": stats.get("stock_impact_method", "llm"),
+                "overall_market_impact": stats.get("overall_market_impact")
             }
         )
     except Exception as e:
@@ -252,8 +262,8 @@ async def get_stats():
 @router.get("/article/{article_id}", tags=["Retrieval"])
 async def get_article(article_id: str):
     """
-    Retrieve article by ID with rich entity data.
-    Returns extracted tickers and confidence scores.
+    Retrieve article by ID with rich entity data and stock impact reasoning.
+    Returns LLM-extracted tickers with confidence scores and impact reasoning.
     """
     article = storage.get_by_id(article_id)
     if not article:
@@ -277,6 +287,15 @@ async def get_article(article_id: str):
     if article.entities_rich:
         response_data["entities_rich"] = article.entities_rich
         response_data["company_tickers"] = article.get_company_tickers()
+    
+    # Add stock impact reasoning (from LLM)
+    if article.impacted_stocks:
+        response_data["stock_impact_summary"] = {
+            "total_stocks": len(article.impacted_stocks),
+            "direct_impacts": sum(1 for s in article.impacted_stocks if s["impact_type"] == "direct"),
+            "sector_impacts": sum(1 for s in article.impacted_stocks if s["impact_type"] == "sector"),
+            "regulatory_impacts": sum(1 for s in article.impacted_stocks if s["impact_type"] == "regulatory")
+        }
     
     return response_data
 
@@ -319,4 +338,35 @@ async def get_article_entities(article_id: str):
         "entities_rich": article.entities_rich,
         "company_tickers": article.get_company_tickers(),
         "extraction_method": "llm"
+    }
+
+@router.get("/article/{article_id}/stock_impacts", tags=["Stock Impact"])
+async def get_article_stock_impacts(article_id: str):
+    """
+    Get detailed stock impact analysis for an article.
+    Returns LLM reasoning for each impacted stock.
+    """
+    article = storage.get_by_id(article_id)
+    if not article:
+        raise HTTPException(status_code=404, detail="Article not found")
+    
+    if not article.impacted_stocks:
+        raise HTTPException(status_code=404, detail="No stock impact data available")
+    
+    return {
+        "article_id": article.id,
+        "title": article.title,
+        "impacted_stocks": article.impacted_stocks,
+        "impact_summary": {
+            "total_stocks": len(article.impacted_stocks),
+            "impact_breakdown": {
+                "direct": sum(1 for s in article.impacted_stocks if s["impact_type"] == "direct"),
+                "sector": sum(1 for s in article.impacted_stocks if s["impact_type"] == "sector"),
+                "regulatory": sum(1 for s in article.impacted_stocks if s["impact_type"] == "regulatory")
+            },
+            "avg_confidence": round(
+                sum(s["confidence"] for s in article.impacted_stocks) / len(article.impacted_stocks), 2
+            ) if article.impacted_stocks else 0.0
+        },
+        "analysis_method": "llm"
     }

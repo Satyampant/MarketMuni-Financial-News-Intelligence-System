@@ -1,6 +1,6 @@
 """
-Updated app/workflows/graph.py - Pure LLM Approach
-Removes all backward compatibility checks and legacy entity extraction
+Updated app/workflows/graph.py - With LLM Stock Impact Mapper
+Integrates LLM-based stock impact analysis into the pipeline.
 """
 
 from typing import TypedDict, List, Annotated, Optional, Dict, Any
@@ -12,13 +12,14 @@ from langgraph.graph import StateGraph, START, END
 from app.core.models import NewsArticle
 from app.services.storage import NewsStorage
 from app.agents.deduplication import DeduplicationAgent
-from app.agents.llm_entity_extractor import LLMEntityExtractor  # NEW: LLM-only
-from app.agents.stock_impact import StockImpactMapper
+from app.agents.llm_entity_extractor import LLMEntityExtractor
+from app.agents.llm_stock_mapper import LLMStockImpactMapper  # NEW: LLM stock mapper
 from app.services.vector_store import VectorStore
 from app.agents.query_processor import QueryProcessor
 from app.agents.sentiment.hybrid import HybridSentimentClassifier
 from app.agents.supply_chain import SupplyChainImpactMapper
 from app.core.config_loader import get_config
+from app.core.llm_schemas import EntityExtractionSchema
 
 
 class NewsIntelligenceState(TypedDict):
@@ -26,6 +27,7 @@ class NewsIntelligenceState(TypedDict):
     articles: Annotated[List[NewsArticle], operator.add]
     current_article: Optional[NewsArticle]
     duplicates: Annotated[List[str], operator.add]
+    entities_schema: Optional[EntityExtractionSchema]  # NEW: Rich entity schema
     entities: Optional[dict]
     impacted_stocks: Optional[List[dict]]
     cross_impacts: Optional[List[Dict]]
@@ -40,7 +42,7 @@ class NewsIntelligenceState(TypedDict):
 class NewsIntelligenceGraph:
     """
     LangGraph-based multi-agent pipeline for financial news intelligence.
-    Pure LLM approach - no legacy rule-based extraction.
+    Fully LLM-powered approach for entity extraction and stock impact mapping.
     """
     
     def __init__(
@@ -49,7 +51,7 @@ class NewsIntelligenceGraph:
         vector_store: VectorStore,
         dedup_agent: Optional[DeduplicationAgent] = None,
         entity_extractor: Optional[LLMEntityExtractor] = None,
-        stock_mapper: Optional[StockImpactMapper] = None,
+        stock_mapper: Optional[LLMStockImpactMapper] = None,  # NEW: LLM mapper
         sentiment_agent: Optional[HybridSentimentClassifier] = None,
         supply_chain_mapper: Optional[SupplyChainImpactMapper] = None,
         sentiment_method: str = None
@@ -62,31 +64,32 @@ class NewsIntelligenceGraph:
         
         self.dedup_agent = dedup_agent or DeduplicationAgent()
         
-        # Pure LLM entity extraction (no fallback to rule-based)
+        # LLM entity extraction
         self.entity_extractor = entity_extractor or LLMEntityExtractor(
             enable_caching=config.performance.cache_embeddings
         )
         
-        self.stock_mapper = stock_mapper or StockImpactMapper()
+        # NEW: LLM stock impact mapper (replaces rule-based)
+        self.stock_mapper = stock_mapper or LLMStockImpactMapper()
         
         self.sentiment_agent = sentiment_agent or HybridSentimentClassifier(
             method=sentiment_method,
-            entity_extractor=None  # Sentiment doesn't need entity extractor
+            entity_extractor=None
         )
         
         self.supply_chain_mapper = supply_chain_mapper or SupplyChainImpactMapper()
         
-        # Query processor now works with rich entity data
+        # Query processor (will be updated in future tasks)
         self.query_processor = QueryProcessor(
             vector_store=self.vector_store,
             entity_extractor=self.entity_extractor,
-            stock_mapper=self.stock_mapper
+            stock_mapper=self.stock_mapper  # Pass new mapper
         )
         
         self.app = self._build_ingestion_graph()
         self.query_app = self._build_query_graph()
         
-        print("✓ NewsIntelligenceGraph initialized with LLM entity extraction")
+        print("✓ NewsIntelligenceGraph initialized with LLM stock impact mapper")
     
     def _build_ingestion_graph(self):
         """Construct the main news ingestion and analysis pipeline."""
@@ -96,7 +99,7 @@ class NewsIntelligenceGraph:
         graph_builder.add_node("ingestion", self._ingestion_agent)
         graph_builder.add_node("deduplication", self._deduplication_agent)
         graph_builder.add_node("entity_extraction", self._entity_extraction_agent)
-        graph_builder.add_node("impact_mapper", self._impact_mapper_agent)
+        graph_builder.add_node("impact_mapper", self._impact_mapper_agent)  # UPDATED
         graph_builder.add_node("cross_impact", self._cross_impact_agent)
         graph_builder.add_node("sentiment_analysis", self._sentiment_analysis_agent)
         graph_builder.add_node("indexing", self._indexing_agent)
@@ -106,8 +109,8 @@ class NewsIntelligenceGraph:
         graph_builder.add_edge("ingestion", "deduplication")
         graph_builder.add_edge("deduplication", "entity_extraction")
         graph_builder.add_edge("entity_extraction", "impact_mapper")
-        graph_builder.add_edge("impact_mapper", "sentiment_analysis") 
-        graph_builder.add_edge("sentiment_analysis", "cross_impact") 
+        graph_builder.add_edge("impact_mapper", "sentiment_analysis")
+        graph_builder.add_edge("sentiment_analysis", "cross_impact")
         graph_builder.add_edge("cross_impact", "indexing")
         graph_builder.add_edge("indexing", END)
         
@@ -176,7 +179,7 @@ class NewsIntelligenceGraph:
         # LLM extraction returns EntityExtractionSchema
         entities_schema = self.entity_extractor.extract_entities(article)
         
-        # Store rich data in article (preserves tickers and confidence)
+        # Store rich data in article
         article.set_entities_rich(entities_schema)
         
         stats = state.get("stats", {})
@@ -188,11 +191,9 @@ class NewsIntelligenceGraph:
             "events": len(entities_schema.events)
         }
         
-        # Add ticker extraction stats
         tickers_extracted = [c.ticker_symbol for c in entities_schema.companies if c.ticker_symbol]
         stats["tickers_extracted"] = len(tickers_extracted)
         
-        # Add confidence stats
         company_confidences = [c.confidence for c in entities_schema.companies]
         if company_confidences:
             stats["avg_company_confidence"] = round(
@@ -204,32 +205,52 @@ class NewsIntelligenceGraph:
         
         return {
             "current_article": article,
-            "entities": article.entities,  # Legacy format for compatibility
+            "entities_schema": entities_schema,  # NEW: Pass rich schema
+            "entities": article.entities,  # Legacy format
             "stats": stats
         }
     
     def _impact_mapper_agent(self, state: NewsIntelligenceState) -> dict:
         """
-        Maps extracted entities to specific stock tickers.
-        Now uses rich entity data with pre-extracted tickers.
+        Maps extracted entities to specific stock tickers using LLM reasoning.
+        UPDATED: Now uses LLM-based stock impact mapper.
         """
         article = state["current_article"]
+        entities_schema = state["entities_schema"]
         
-        # Use legacy format for compatibility with StockImpactMapper
-        # TODO: Update StockImpactMapper to use rich entity data directly
-        entities = article.entities
+        if not entities_schema:
+            # Fallback: reconstruct from article.entities_rich
+            from app.core.llm_schemas import EntityExtractionSchema
+            if hasattr(article, 'entities_rich') and article.entities_rich:
+                entities_schema = EntityExtractionSchema.model_validate(article.entities_rich)
+            else:
+                raise ValueError("No entity schema available for impact mapping")
         
-        impacts = self.stock_mapper.map_to_stocks(entities)
-        impact_dicts = [imp.to_dict() for imp in impacts]
+        # NEW: LLM-based impact mapping
+        impact_result = self.stock_mapper.map_to_stocks(entities_schema, article)
+        
+        # Convert to legacy format and attach to article
+        impact_dicts = [
+            {
+                "symbol": stock.symbol,
+                "company_name": stock.company_name,
+                "confidence": stock.confidence,
+                "impact_type": stock.impact_type.value,
+                "reasoning": stock.reasoning
+            }
+            for stock in impact_result.impacted_stocks
+        ]
         article.impacted_stocks = impact_dicts
         
         stats = state.get("stats", {})
-        stats["stocks_impacted"] = len(impacts)
+        stats["stocks_impacted"] = len(impact_result.impacted_stocks)
         stats["impact_breakdown"] = {
-            "direct": sum(1 for i in impacts if i.impact_type == "direct"),
-            "sector": sum(1 for i in impacts if i.impact_type == "sector"),
-            "regulatory": sum(1 for i in impacts if i.impact_type == "regulatory")
+            "direct": sum(1 for s in impact_result.impacted_stocks if s.impact_type.value == "direct"),
+            "sector": sum(1 for s in impact_result.impacted_stocks if s.impact_type.value == "sector"),
+            "regulatory": sum(1 for s in impact_result.impacted_stocks if s.impact_type.value == "regulatory")
         }
+        stats["stock_impact_method"] = "llm"
+        stats["overall_market_impact"] = impact_result.overall_market_impact
         
         return {
             "current_article": article,
@@ -368,6 +389,7 @@ class NewsIntelligenceGraph:
             "articles": [],
             "current_article": article,
             "duplicates": [],
+            "entities_schema": None,  # NEW
             "entities": None,
             "impacted_stocks": None,
             "cross_impacts": None,
@@ -387,6 +409,7 @@ class NewsIntelligenceGraph:
             "articles": [],
             "current_article": None,
             "duplicates": [],
+            "entities_schema": None,
             "entities": None,
             "impacted_stocks": None,
             "cross_impacts": None,
@@ -419,6 +442,10 @@ class NewsIntelligenceGraph:
         # Entity extraction stats
         entity_stats = self.entity_extractor.get_cache_stats()
         
+        # NEW: Stock impact stats
+        articles = self.storage.get_all_articles()
+        stock_impact_stats = self.stock_mapper.get_impact_statistics(articles)
+        
         return {
             "total_articles_stored": total_articles,
             "vector_store_count": vector_count,
@@ -429,6 +456,10 @@ class NewsIntelligenceGraph:
             "entity_extraction": {
                 "method": "llm",
                 "cache_stats": entity_stats
+            },
+            "stock_impact_mapping": {
+                "method": "llm",
+                "statistics": stock_impact_stats
             },
             "sentiment_analysis": {
                 "method": sentiment_method_info,
