@@ -1,6 +1,6 @@
 """
-Updated app/workflows/graph.py - With LLM Sentiment Analysis
-Replaces hybrid sentiment approach with pure LLM-based analysis.
+Updated app/workflows/graph.py - With LLM Supply Chain Analysis
+Full LLM pipeline: Entity Extraction → Stock Impact → Sentiment → Supply Chain (LLM-based)
 """
 
 from typing import TypedDict, List, Annotated, Optional, Dict, Any
@@ -14,12 +14,12 @@ from app.services.storage import NewsStorage
 from app.agents.deduplication import DeduplicationAgent
 from app.agents.llm_entity_extractor import LLMEntityExtractor
 from app.agents.llm_stock_mapper import LLMStockImpactMapper
-from app.agents.llm_sentiment import LLMSentimentAnalyzer  # NEW: LLM sentiment
+from app.agents.llm_sentiment import LLMSentimentAnalyzer
+from app.agents.llm_supply_chain import LLMSupplyChainAnalyzer  # NEW: LLM supply chain
 from app.services.vector_store import VectorStore
 from app.agents.query_processor import QueryProcessor
-from app.agents.supply_chain import SupplyChainImpactMapper
 from app.core.config_loader import get_config
-from app.core.llm_schemas import EntityExtractionSchema
+from app.core.llm_schemas import EntityExtractionSchema, SentimentAnalysisSchema
 
 
 class NewsIntelligenceState(TypedDict):
@@ -30,6 +30,7 @@ class NewsIntelligenceState(TypedDict):
     entities_schema: Optional[EntityExtractionSchema]
     entities: Optional[dict]
     impacted_stocks: Optional[List[dict]]
+    sentiment_schema: Optional[SentimentAnalysisSchema]
     cross_impacts: Optional[List[Dict]]
     sentiment: Optional[dict]
     query_text: Optional[str]
@@ -42,7 +43,7 @@ class NewsIntelligenceState(TypedDict):
 class NewsIntelligenceGraph:
     """
     LangGraph-based multi-agent pipeline for financial news intelligence.
-    Fully LLM-powered approach for entity extraction, stock impact, and sentiment analysis.
+    Fully LLM-powered approach for all agents.
     """
     
     def __init__(
@@ -52,8 +53,8 @@ class NewsIntelligenceGraph:
         dedup_agent: Optional[DeduplicationAgent] = None,
         entity_extractor: Optional[LLMEntityExtractor] = None,
         stock_mapper: Optional[LLMStockImpactMapper] = None,
-        sentiment_analyzer: Optional[LLMSentimentAnalyzer] = None,  # NEW: LLM sentiment
-        supply_chain_mapper: Optional[SupplyChainImpactMapper] = None
+        sentiment_analyzer: Optional[LLMSentimentAnalyzer] = None,
+        supply_chain_analyzer: Optional[LLMSupplyChainAnalyzer] = None  # NEW: LLM supply chain
     ):
         config = get_config()
 
@@ -70,14 +71,15 @@ class NewsIntelligenceGraph:
         # LLM stock impact mapper
         self.stock_mapper = stock_mapper or LLMStockImpactMapper()
         
-        # NEW: LLM sentiment analyzer (replaces hybrid approach)
+        # LLM sentiment analyzer
         self.sentiment_analyzer = sentiment_analyzer or LLMSentimentAnalyzer(
             use_entity_context=True
         )
         
-        self.supply_chain_mapper = supply_chain_mapper or SupplyChainImpactMapper()
+        # NEW: LLM supply chain analyzer (replaces rule-based approach)
+        self.supply_chain_analyzer = supply_chain_analyzer or LLMSupplyChainAnalyzer()
         
-        # Query processor
+        # Query processor (uses legacy entity extractor for query expansion)
         self.query_processor = QueryProcessor(
             vector_store=self.vector_store,
             entity_extractor=self.entity_extractor,
@@ -91,6 +93,7 @@ class NewsIntelligenceGraph:
         print("  - Entity extraction: LLM")
         print("  - Stock impact mapping: LLM")
         print("  - Sentiment analysis: LLM")
+        print("  - Supply chain analysis: LLM")
     
     def _build_ingestion_graph(self):
         """Construct the main news ingestion and analysis pipeline."""
@@ -101,7 +104,7 @@ class NewsIntelligenceGraph:
         graph_builder.add_node("deduplication", self._deduplication_agent)
         graph_builder.add_node("entity_extraction", self._entity_extraction_agent)
         graph_builder.add_node("impact_mapper", self._impact_mapper_agent)
-        graph_builder.add_node("sentiment_analysis", self._sentiment_analysis_agent)  # UPDATED
+        graph_builder.add_node("sentiment_analysis", self._sentiment_analysis_agent)
         graph_builder.add_node("cross_impact", self._cross_impact_agent)
         graph_builder.add_node("indexing", self._indexing_agent)
         
@@ -254,10 +257,7 @@ class NewsIntelligenceGraph:
         }
     
     def _sentiment_analysis_agent(self, state: NewsIntelligenceState) -> dict:
-        """
-        Performs LLM-based sentiment analysis with entity context.
-        UPDATED: Uses LLMSentimentAnalyzer instead of hybrid approach.
-        """
+        """Performs LLM-based sentiment analysis with entity context."""
         article = state["current_article"]
         entities_schema = state.get("entities_schema")
         
@@ -267,6 +267,9 @@ class NewsIntelligenceGraph:
             entities_schema = EntityExtractionSchema.model_validate(article.entities_rich)
         
         # LLM sentiment analysis with entity context
+        sentiment_schema = self.sentiment_analyzer.analyze_sentiment(article, entities_schema)
+        
+        # Attach to article (convert to legacy format)
         self.sentiment_analyzer.analyze_and_attach(article, entities_schema)
         sentiment_data = article.get_sentiment()
         
@@ -287,22 +290,46 @@ class NewsIntelligenceGraph:
         
         return {
             "current_article": article,
+            "sentiment_schema": sentiment_schema,
             "sentiment": sentiment_data.to_dict() if sentiment_data else None,
             "stats": stats
         }
     
     def _cross_impact_agent(self, state: NewsIntelligenceState) -> dict:
-        """Analyzes supply chain relationships for upstream/downstream effects."""
+        """
+        Analyzes supply chain relationships using LLM reasoning.
+        UPDATED: Uses LLMSupplyChainAnalyzer instead of rule-based approach.
+        """
         article = state["current_article"]
-        entities = article.entities
-        sectors = entities.get("Sectors", [])
+        entities_schema = state.get("entities_schema")
+        sentiment_schema = state.get("sentiment_schema")
         
-        if not sectors:
+        # Reconstruct schemas if not in state
+        if not entities_schema and hasattr(article, 'entities_rich') and article.entities_rich:
+            from app.core.llm_schemas import EntityExtractionSchema
+            entities_schema = EntityExtractionSchema.model_validate(article.entities_rich)
+        
+        if not sentiment_schema and article.has_sentiment():
+            from app.core.llm_schemas import SentimentAnalysisSchema, SentimentClassification
+            sentiment_data = article.get_sentiment()
+            sentiment_schema = SentimentAnalysisSchema(
+                classification=SentimentClassification(sentiment_data.classification),
+                confidence_score=sentiment_data.confidence_score,
+                key_factors=sentiment_data.sentiment_breakdown.get("key_factors", ["N/A"]),
+                signal_strength=sentiment_data.signal_strength,
+                sentiment_breakdown=sentiment_data.sentiment_breakdown.get("sentiment_percentages"),
+                entity_influence=sentiment_data.sentiment_breakdown.get("entity_influence")
+            )
+        
+        # Check if we have required data for supply chain analysis
+        if not entities_schema or not sentiment_schema:
             stats = state.get("stats", {})
             stats.update({
                 "cross_impacts_found": 0,
                 "upstream_dependencies": 0,
-                "downstream_impacts": 0
+                "downstream_impacts": 0,
+                "supply_chain_method": "llm",
+                "supply_chain_skipped": "Missing entities or sentiment data"
             })
             return {
                 "current_article": article,
@@ -310,28 +337,65 @@ class NewsIntelligenceGraph:
                 "stats": stats
             }
         
-        cross_impacts = self.supply_chain_mapper.generate_cross_impact_insights(
-            article, 
-            entities
+        # Check if sectors are present (required for supply chain analysis)
+        if not entities_schema.sectors:
+            stats = state.get("stats", {})
+            stats.update({
+                "cross_impacts_found": 0,
+                "upstream_dependencies": 0,
+                "downstream_impacts": 0,
+                "supply_chain_method": "llm",
+                "supply_chain_skipped": "No sectors identified"
+            })
+            return {
+                "current_article": article,
+                "cross_impacts": [],
+                "stats": stats
+            }
+        
+        # LLM-based supply chain analysis
+        supply_chain_result = self.supply_chain_analyzer.generate_cross_impact_insights(
+            article, entities_schema, sentiment_schema
         )
         
-        cross_impact_dicts = [impact.to_dict() for impact in cross_impacts]
-        article.cross_impacts = cross_impact_dicts
+        # Convert to legacy format and attach to article
+        all_impacts = (
+            supply_chain_result.upstream_impacts +
+            supply_chain_result.downstream_impacts
+        )
         
-        upstream_count = sum(1 for i in cross_impacts if i.relationship_type == "upstream_demand_shock")
-        downstream_count = sum(1 for i in cross_impacts if i.relationship_type == "downstream_supply_impact")
+        cross_impact_dicts = [
+            {
+                "source_sector": impact.source_sector,
+                "target_sector": impact.target_sector,
+                "relationship_type": impact.relationship_type.value,
+                "impact_score": impact.impact_score,
+                "dependency_weight": impact.dependency_weight,
+                "reasoning": impact.reasoning,
+                "impacted_stocks": impact.impacted_stocks,
+                "time_horizon": impact.time_horizon
+            }
+            for impact in all_impacts
+        ]
+        
+        article.set_cross_impacts(cross_impact_dicts)
+        
+        upstream_count = len(supply_chain_result.upstream_impacts)
+        downstream_count = len(supply_chain_result.downstream_impacts)
         
         stats = state.get("stats", {})
-        stats["cross_impacts_found"] = len(cross_impacts)
+        stats["cross_impacts_found"] = len(all_impacts)
         stats["upstream_dependencies"] = upstream_count
         stats["downstream_impacts"] = downstream_count
+        stats["supply_chain_method"] = "llm"
+        stats["total_sectors_impacted"] = supply_chain_result.total_sectors_impacted
         
-        if cross_impacts:
-            top_impact = cross_impacts[0]
+        if all_impacts:
+            top_impact = all_impacts[0]
             stats["top_cross_impact"] = {
-                "target_sector": top_impact.target_sector,
-                "impact_score": top_impact.impact_score,
-                "relationship_type": top_impact.relationship_type
+                "target_sector": top_impact.get("target_sector"),
+                "impact_score": top_impact.get("impact_score"),
+                "relationship_type": top_impact.get("relationship_type")
             }
         
         return {
@@ -398,6 +462,7 @@ class NewsIntelligenceGraph:
             "entities_schema": None,
             "entities": None,
             "impacted_stocks": None,
+            "sentiment_schema": None,
             "cross_impacts": None,
             "sentiment": None,
             "query_text": None,
@@ -418,6 +483,7 @@ class NewsIntelligenceGraph:
             "entities_schema": None,
             "entities": None,
             "impacted_stocks": None,
+            "sentiment_schema": None,
             "cross_impacts": None,
             "sentiment": None,
             "query_text": query_text,
@@ -436,14 +502,6 @@ class NewsIntelligenceGraph:
         
         sentiment_stats = self.vector_store.get_sentiment_statistics()
         
-        supply_chain_info = {
-            "sectors_mapped": len(self.supply_chain_mapper.supply_chain_graph),
-            "total_relationships": sum(
-                len(sector_data.get("depends_on", [])) + len(sector_data.get("impacts", []))
-                for sector_data in self.supply_chain_mapper.supply_chain_graph.values()
-            )
-        }
-        
         # Entity extraction stats
         entity_stats = self.entity_extractor.get_cache_stats()
         
@@ -453,6 +511,9 @@ class NewsIntelligenceGraph:
         
         # Sentiment statistics from analyzer
         sentiment_analyzer_stats = self.sentiment_analyzer.get_sentiment_statistics(articles)
+        
+        # NEW: Supply chain statistics from LLM analyzer
+        supply_chain_stats = self.supply_chain_analyzer.get_impact_statistics(articles)
         
         return {
             "total_articles_stored": total_articles,
@@ -474,6 +535,9 @@ class NewsIntelligenceGraph:
                 "vector_store_stats": sentiment_stats,
                 "analyzer_stats": sentiment_analyzer_stats
             },
-            "supply_chain_analysis": supply_chain_info,
+            "supply_chain_analysis": {
+                "method": "llm",
+                "statistics": supply_chain_stats
+            },
             "status": "operational"
         }

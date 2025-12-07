@@ -1,6 +1,6 @@
 """
-Updated app/api/routes.py - Full LLM Pipeline with LLM Sentiment Analysis
-Uses LLM for entity extraction, stock impact mapping, and sentiment analysis.
+Updated app/api/routes.py - Full LLM Pipeline with LLM Supply Chain Analysis
+All agents now use LLM-based approach.
 """
 
 from fastapi import APIRouter, HTTPException, Query
@@ -17,8 +17,8 @@ from app.services.vector_store import VectorStore
 from app.agents.deduplication import DeduplicationAgent
 from app.agents.llm_entity_extractor import LLMEntityExtractor
 from app.agents.llm_stock_mapper import LLMStockImpactMapper
-from app.agents.llm_sentiment import LLMSentimentAnalyzer  # NEW: LLM sentiment
-from app.agents.supply_chain import SupplyChainImpactMapper
+from app.agents.llm_sentiment import LLMSentimentAnalyzer
+from app.agents.llm_supply_chain import LLMSupplyChainAnalyzer  # NEW: LLM supply chain
 from app.workflows.graph import NewsIntelligenceGraph
 from app.core.config import Paths
 from app.core.config_loader import get_config
@@ -45,13 +45,15 @@ entity_extractor = LLMEntityExtractor(
 print("✓ Initializing LLM-based stock impact mapper")
 stock_mapper = LLMStockImpactMapper()
 
-# NEW: LLM sentiment analyzer
+# LLM sentiment analyzer
 print("✓ Initializing LLM-based sentiment analyzer")
 sentiment_analyzer = LLMSentimentAnalyzer(
     use_entity_context=True
 )
 
-supply_chain_mapper = SupplyChainImpactMapper()
+# NEW: LLM supply chain analyzer
+print("✓ Initializing LLM-based supply chain analyzer")
+supply_chain_analyzer = LLMSupplyChainAnalyzer()
 
 # Orchestrator setup with full LLM pipeline
 news_graph = NewsIntelligenceGraph(
@@ -60,8 +62,8 @@ news_graph = NewsIntelligenceGraph(
     dedup_agent=dedup_agent,
     entity_extractor=entity_extractor,
     stock_mapper=stock_mapper,
-    sentiment_analyzer=sentiment_analyzer 
-    supply_chain_mapper=supply_chain_mapper
+    sentiment_analyzer=sentiment_analyzer,
+    supply_chain_analyzer=supply_chain_analyzer  # NEW: Pass LLM supply chain analyzer
 )
 
 @router.get("/", tags=["General"])
@@ -72,9 +74,9 @@ async def root():
         "features": {
             "entity_extraction": "llm",
             "stock_impact_mapping": "llm",
-            "sentiment_analysis": "llm",  # UPDATED
-            "deduplication": "semantic",
-            "supply_chain_analysis": "enabled"
+            "sentiment_analysis": "llm",
+            "supply_chain_analysis": "llm",  # UPDATED
+            "deduplication": "semantic"
         },
         "docs": "/docs"
     }
@@ -108,6 +110,10 @@ async def health_check():
                 "status": "operational"
             },
             "sentiment_analysis": {
+                "method": "llm",
+                "status": "operational"
+            },
+            "supply_chain_analysis": {
                 "method": "llm",
                 "status": "operational"
             }
@@ -166,7 +172,7 @@ async def ingest_article(article_input: ArticleInput):
     - LLM entity extraction (companies with tickers, sectors, regulators, events)
     - LLM stock impact mapping with reasoning
     - LLM sentiment analysis with key factors
-    - Supply chain impact analysis
+    - LLM supply chain impact analysis with cross-sectoral reasoning
     """
     try:
         article = NewsArticle(
@@ -212,7 +218,12 @@ async def ingest_article(article_input: ArticleInput):
                 "stock_impact_method": stats.get("stock_impact_method", "llm"),
                 "sentiment_method": stats.get("sentiment_method", "llm"),
                 "sentiment_key_factors_count": stats.get("sentiment_key_factors_count", 0),
-                "overall_market_impact": stats.get("overall_market_impact")
+                "overall_market_impact": stats.get("overall_market_impact"),
+                "supply_chain_method": stats.get("supply_chain_method", "llm"),
+                "cross_impacts_found": stats.get("cross_impacts_found", 0),
+                "upstream_dependencies": stats.get("upstream_dependencies", 0),
+                "downstream_impacts": stats.get("downstream_impacts", 0),
+                "total_sectors_impacted": stats.get("total_sectors_impacted", 0)
             }
         )
     except Exception as e:
@@ -275,8 +286,7 @@ async def get_stats():
 @router.get("/article/{article_id}", tags=["Retrieval"])
 async def get_article(article_id: str):
     """
-    Retrieve article by ID with rich entity data and stock impact reasoning.
-    Returns LLM-extracted tickers with confidence scores and impact reasoning.
+    Retrieve article by ID with rich entity data, stock impact reasoning, and supply chain impacts.
     """
     article = storage.get_by_id(article_id)
     if not article:
@@ -293,7 +303,8 @@ async def get_article(article_id: str):
         "timestamp": article.timestamp.isoformat(),
         "entities": article.entities,
         "impacted_stocks": article.impacted_stocks,
-        "sentiment": sentiment_dict
+        "sentiment": sentiment_dict,
+        "cross_impacts": article.cross_impacts if hasattr(article, 'cross_impacts') else []
     }
     
     # Add rich entity data with tickers
@@ -308,6 +319,20 @@ async def get_article(article_id: str):
             "direct_impacts": sum(1 for s in article.impacted_stocks if s["impact_type"] == "direct"),
             "sector_impacts": sum(1 for s in article.impacted_stocks if s["impact_type"] == "sector"),
             "regulatory_impacts": sum(1 for s in article.impacted_stocks if s["impact_type"] == "regulatory")
+        }
+    
+    # Add supply chain impact summary (from LLM)
+    if article.has_cross_impacts():
+        upstream_count = sum(1 for i in article.cross_impacts if i["relationship_type"] == "upstream_demand_shock")
+        downstream_count = sum(1 for i in article.cross_impacts if i["relationship_type"] == "downstream_supply_impact")
+        
+        response_data["supply_chain_summary"] = {
+            "total_impacts": len(article.cross_impacts),
+            "upstream_impacts": upstream_count,
+            "downstream_impacts": downstream_count,
+            "max_impact_score": max((i["impact_score"] for i in article.cross_impacts), default=0.0),
+            "affected_sectors": list(set(i["target_sector"] for i in article.cross_impacts)),
+            "analysis_method": "llm"
         }
     
     # Add sentiment key factors if available
@@ -387,6 +412,40 @@ async def get_article_stock_impacts(article_id: str):
             "avg_confidence": round(
                 sum(s["confidence"] for s in article.impacted_stocks) / len(article.impacted_stocks), 2
             ) if article.impacted_stocks else 0.0
+        },
+        "analysis_method": "llm"
+    }
+
+@router.get("/article/{article_id}/supply_chain", tags=["Supply Chain"])
+async def get_article_supply_chain_impacts(article_id: str):
+    """
+    Get detailed supply chain impact analysis for an article.
+    Returns LLM reasoning for upstream and downstream effects.
+    """
+    article = storage.get_by_id(article_id)
+    if not article:
+        raise HTTPException(status_code=404, detail="Article not found")
+    
+    if not article.has_cross_impacts():
+        raise HTTPException(status_code=404, detail="No supply chain impact data available")
+    
+    upstream_impacts = [i for i in article.cross_impacts if i["relationship_type"] == "upstream_demand_shock"]
+    downstream_impacts = [i for i in article.cross_impacts if i["relationship_type"] == "downstream_supply_impact"]
+    
+    return {
+        "article_id": article.id,
+        "title": article.title,
+        "upstream_impacts": upstream_impacts,
+        "downstream_impacts": downstream_impacts,
+        "impact_summary": {
+            "total_impacts": len(article.cross_impacts),
+            "upstream_count": len(upstream_impacts),
+            "downstream_count": len(downstream_impacts),
+            "max_impact_score": max((i["impact_score"] for i in article.cross_impacts), default=0.0),
+            "affected_sectors": list(set(i["target_sector"] for i in article.cross_impacts)),
+            "avg_dependency_weight": round(
+                sum(i["dependency_weight"] for i in article.cross_impacts) / len(article.cross_impacts), 2
+            ) if article.cross_impacts else 0.0
         },
         "analysis_method": "llm"
     }
