@@ -1,3 +1,8 @@
+"""
+Updated app/workflows/graph.py - Pure LLM Approach
+Removes all backward compatibility checks and legacy entity extraction
+"""
+
 from typing import TypedDict, List, Annotated, Optional, Dict, Any
 import operator
 from datetime import datetime
@@ -7,7 +12,7 @@ from langgraph.graph import StateGraph, START, END
 from app.core.models import NewsArticle
 from app.services.storage import NewsStorage
 from app.agents.deduplication import DeduplicationAgent
-from app.agents.entity_extraction import EntityExtractor
+from app.agents.llm_entity_extractor import LLMEntityExtractor  # NEW: LLM-only
 from app.agents.stock_impact import StockImpactMapper
 from app.services.vector_store import VectorStore
 from app.agents.query_processor import QueryProcessor
@@ -33,12 +38,17 @@ class NewsIntelligenceState(TypedDict):
 
 
 class NewsIntelligenceGraph:
+    """
+    LangGraph-based multi-agent pipeline for financial news intelligence.
+    Pure LLM approach - no legacy rule-based extraction.
+    """
+    
     def __init__(
         self,
         storage: NewsStorage,
         vector_store: VectorStore,
         dedup_agent: Optional[DeduplicationAgent] = None,
-        entity_extractor: Optional[EntityExtractor] = None,
+        entity_extractor: Optional[LLMEntityExtractor] = None,
         stock_mapper: Optional[StockImpactMapper] = None,
         sentiment_agent: Optional[HybridSentimentClassifier] = None,
         supply_chain_mapper: Optional[SupplyChainImpactMapper] = None,
@@ -51,16 +61,22 @@ class NewsIntelligenceGraph:
         self.vector_store = vector_store
         
         self.dedup_agent = dedup_agent or DeduplicationAgent()
-        self.entity_extractor = entity_extractor or EntityExtractor()
+        
+        # Pure LLM entity extraction (no fallback to rule-based)
+        self.entity_extractor = entity_extractor or LLMEntityExtractor(
+            enable_caching=config.performance.cache_embeddings
+        )
+        
         self.stock_mapper = stock_mapper or StockImpactMapper()
         
         self.sentiment_agent = sentiment_agent or HybridSentimentClassifier(
             method=sentiment_method,
-            entity_extractor=self.entity_extractor
+            entity_extractor=None  # Sentiment doesn't need entity extractor
         )
         
         self.supply_chain_mapper = supply_chain_mapper or SupplyChainImpactMapper()
         
+        # Query processor now works with rich entity data
         self.query_processor = QueryProcessor(
             vector_store=self.vector_store,
             entity_extractor=self.entity_extractor,
@@ -69,6 +85,8 @@ class NewsIntelligenceGraph:
         
         self.app = self._build_ingestion_graph()
         self.query_app = self._build_query_graph()
+        
+        print("✓ NewsIntelligenceGraph initialized with LLM entity extraction")
     
     def _build_ingestion_graph(self):
         """Construct the main news ingestion and analysis pipeline."""
@@ -149,30 +167,57 @@ class NewsIntelligenceGraph:
         return {"duplicates": [], "stats": stats}
     
     def _entity_extraction_agent(self, state: NewsIntelligenceState) -> dict:
-        """Extracts key entities (companies, sectors, etc.) from the content."""
+        """
+        Extracts entities using LLM with structured output.
+        Stores rich EntityExtractionSchema with tickers and confidence scores.
+        """
         article = state["current_article"]
-        entities = self.entity_extractor.extract_entities(article)
-        article.entities = entities
+        
+        # LLM extraction returns EntityExtractionSchema
+        entities_schema = self.entity_extractor.extract_entities(article)
+        
+        # Store rich data in article (preserves tickers and confidence)
+        article.set_entities_rich(entities_schema)
         
         stats = state.get("stats", {})
         stats["entities_extracted"] = {
-            "companies": len(entities.get("Companies", [])),
-            "sectors": len(entities.get("Sectors", [])),
-            "regulators": len(entities.get("Regulators", [])),
-            "people": len(entities.get("People", [])),
-            "events": len(entities.get("Events", []))
+            "companies": len(entities_schema.companies),
+            "sectors": len(entities_schema.sectors),
+            "regulators": len(entities_schema.regulators),
+            "people": len(entities_schema.people),
+            "events": len(entities_schema.events)
         }
+        
+        # Add ticker extraction stats
+        tickers_extracted = [c.ticker_symbol for c in entities_schema.companies if c.ticker_symbol]
+        stats["tickers_extracted"] = len(tickers_extracted)
+        
+        # Add confidence stats
+        company_confidences = [c.confidence for c in entities_schema.companies]
+        if company_confidences:
+            stats["avg_company_confidence"] = round(
+                sum(company_confidences) / len(company_confidences), 2
+            )
+        
+        stats["entity_extraction_method"] = "llm"
+        stats["extraction_reasoning"] = entities_schema.extraction_reasoning
         
         return {
             "current_article": article,
-            "entities": entities,
+            "entities": article.entities,  # Legacy format for compatibility
             "stats": stats
         }
     
     def _impact_mapper_agent(self, state: NewsIntelligenceState) -> dict:
-        """Maps extracted entities to specific stock tickers."""
+        """
+        Maps extracted entities to specific stock tickers.
+        Now uses rich entity data with pre-extracted tickers.
+        """
         article = state["current_article"]
-        entities = state["entities"]
+        
+        # Use legacy format for compatibility with StockImpactMapper
+        # TODO: Update StockImpactMapper to use rich entity data directly
+        entities = article.entities
         
         impacts = self.stock_mapper.map_to_stocks(entities)
         impact_dicts = [imp.to_dict() for imp in impacts]
@@ -195,7 +240,7 @@ class NewsIntelligenceGraph:
     def _cross_impact_agent(self, state: NewsIntelligenceState) -> dict:
         """Analyzes supply chain relationships for upstream/downstream effects."""
         article = state["current_article"]
-        entities = state["entities"]
+        entities = article.entities
         sectors = entities.get("Sectors", [])
         
         if not sectors:
@@ -371,12 +416,19 @@ class NewsIntelligenceGraph:
             )
         }
         
+        # Entity extraction stats
+        entity_stats = self.entity_extractor.get_cache_stats()
+        
         return {
             "total_articles_stored": total_articles,
             "vector_store_count": vector_count,
             "dedup_threshold": {
                 "bi_encoder": self.dedup_agent.bi_threshold,
                 "cross_encoder": self.dedup_agent.cross_threshold
+            },
+            "entity_extraction": {
+                "method": "llm",
+                "cache_stats": entity_stats
             },
             "sentiment_analysis": {
                 "method": sentiment_method_info,

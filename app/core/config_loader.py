@@ -12,6 +12,18 @@ from dataclasses import dataclass, field
 ROOT_DIR = Path(__file__).resolve().parent.parent.parent
 CONFIG_FILE = ROOT_DIR / "config.yaml"
 
+@dataclass
+class RedisConfig:
+    """Redis cache configuration."""
+    enabled: bool = True
+    host: str = "localhost"
+    port: int = 6379
+    db: int = 0
+    password: Optional[str] = None
+    ttl_seconds: int = 86400  # 24 hours
+    max_connections: int = 50
+    socket_timeout: int = 5
+    socket_connect_timeout: int = 5
 
 @dataclass
 class DeduplicationConfig:
@@ -185,7 +197,8 @@ class Config:
     query_processing: QueryProcessingConfig = field(default_factory=QueryProcessingConfig)
     stock_impact: StockImpactConfig = field(default_factory=StockImpactConfig)
     supply_chain: SupplyChainConfig = field(default_factory=SupplyChainConfig)
-    llm: LLMConfig = field(default_factory=LLMConfig)  # NEW: LLM configuration
+    llm: LLMConfig = field(default_factory=LLMConfig)  
+    redis: RedisConfig = field(default_factory=RedisConfig)
     api: APIConfig = field(default_factory=APIConfig)
     resources: ResourcesConfig = field(default_factory=ResourcesConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
@@ -365,6 +378,27 @@ def load_config(config_path: Optional[Path] = None) -> Config:
                 max_retries=llm.get('max_retries', 3),
                 models=models_config,
                 features=features_config
+            )
+
+        # --- Redis Configuration (NEW) ---
+        if 'redis' in yaml_data:
+            redis_config = yaml_data['redis']
+            
+            # Support environment variable override for password
+            redis_password = redis_config.get('password')
+            if redis_password is None:
+                redis_password = os.getenv('REDIS_PASSWORD')
+            
+            config.redis = RedisConfig(
+                enabled=redis_config.get('enabled', True),
+                host=redis_config.get('host', 'localhost'),
+                port=redis_config.get('port', 6379),
+                db=redis_config.get('db', 0),
+                password=redis_password,
+                ttl_seconds=redis_config.get('ttl_seconds', 86400),
+                max_connections=redis_config.get('connection_pool', {}).get('max_connections', 50),
+                socket_timeout=redis_config.get('connection_pool', {}).get('socket_timeout', 5),
+                socket_connect_timeout=redis_config.get('connection_pool', {}).get('socket_connect_timeout', 5)
             )
         
         # --- API ---

@@ -21,4 +21,5 @@ dependencies = [
     "langchain-groq>=0.1.0",
     "pytest>=9.0.1",
     "python-dotenv",
+    "redis>=7.1.0",
 ]

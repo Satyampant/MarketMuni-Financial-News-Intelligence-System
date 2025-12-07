@@ -1,3 +1,8 @@
+"""
+Updated app/api/routes.py - Pure LLM Approach
+No conditional checks - always uses LLM entity extraction
+"""
+
 from fastapi import APIRouter, HTTPException, Query
 from typing import Optional
 from datetime import datetime
@@ -10,7 +15,7 @@ from app.api.schemas import (
 from app.services.storage import NewsStorage
 from app.services.vector_store import VectorStore
 from app.agents.deduplication import DeduplicationAgent
-from app.agents.entity_extraction import EntityExtractor
+from app.agents.llm_entity_extractor import LLMEntityExtractor  # LLM-only
 from app.agents.stock_impact import StockImpactMapper
 from app.agents.supply_chain import SupplyChainImpactMapper
 from app.workflows.graph import NewsIntelligenceGraph
@@ -28,11 +33,17 @@ vector_store = VectorStore(
 )
 
 dedup_agent = DeduplicationAgent()
-entity_extractor = EntityExtractor()
+
+# LLM entity extraction (pure approach)
+print("✓ Initializing LLM-based entity extraction")
+entity_extractor = LLMEntityExtractor(
+    enable_caching=config.performance.cache_embeddings
+)
+
 stock_mapper = StockImpactMapper()
 supply_chain_mapper = SupplyChainImpactMapper()
 
-# Orchestrator setup
+# Orchestrator setup with LLM extraction
 news_graph = NewsIntelligenceGraph(
     storage=storage,
     vector_store=vector_store,
@@ -46,24 +57,98 @@ news_graph = NewsIntelligenceGraph(
 @router.get("/", tags=["General"])
 async def root():
     return {
-        "message": "Financial News Intelligence API (Modular)",
-        "version": "1.0.0",
+        "message": "MarketMuni - Financial News Intelligence API",
+        "version": "2.0.0",
+        "features": {
+            "entity_extraction": "llm",
+            "sentiment_analysis": config.sentiment_analysis.method,
+            "deduplication": "semantic",
+            "supply_chain_analysis": "enabled"
+        },
         "docs": "/docs"
     }
 
 @router.get("/health", tags=["General"])
 async def health_check():
-    return {
+    """
+    Comprehensive health check including Redis cache status.
+    """
+    cache_stats = entity_extractor.get_cache_stats()
+    
+    health_status = {
         "status": "healthy",
         "timestamp": datetime.now().isoformat(),
         "components": {
-            "storage": storage.article_count(),
-            "vector_store": vector_store.count()
+            "storage": {
+                "status": "healthy",
+                "articles_count": storage.article_count()
+            },
+            "vector_store": {
+                "status": "healthy",
+                "count": vector_store.count()
+            },
+            "entity_extraction": {
+                "method": "llm",
+                "cache_type": cache_stats.get("cache_type", "none"),
+                "cache_enabled": cache_stats.get("cache_enabled", False)
+            }
         }
+    }
+    
+    # Add Redis-specific stats if connected
+    if cache_stats.get("connected"):
+        health_status["components"]["redis_cache"] = {
+            "status": "healthy",
+            "host": cache_stats.get("host"),
+            "port": cache_stats.get("port"),
+            "db": cache_stats.get("db"),
+            "cached_keys": cache_stats.get("cached_keys"),
+            "memory_used": cache_stats.get("memory_used"),
+            "ttl_seconds": cache_stats.get("ttl_seconds")
+        }
+    else:
+        health_status["components"]["redis_cache"] = {
+            "status": "unavailable",
+            "message": "Redis not connected - using in-memory fallback"
+        }
+        # Downgrade overall status if Redis is expected but unavailable
+        if config.redis.enabled:
+            health_status["status"] = "degraded"
+    
+    return health_status
+
+
+@router.get("/cache/stats", tags=["Cache"])
+async def get_cache_stats():
+    """
+    Get detailed cache statistics.
+    """
+    return entity_extractor.get_cache_stats()
+
+
+@router.post("/cache/clear", tags=["Cache"])
+async def clear_cache(article_id: Optional[str] = None):
+    """
+    Clear cache entries.
+    
+    Args:
+        article_id: Specific article to clear (None = clear all)
+    """
+    cleared = entity_extractor.clear_cache(article_id)
+    
+    return {
+        "success": True,
+        "cleared_count": cleared,
+        "article_id": article_id,
+        "message": f"Cleared {cleared} cache entries"
     }
 
 @router.post("/ingest", response_model=IngestResponse, tags=["Ingestion"])
 async def ingest_article(article_input: ArticleInput):
+    """
+    Ingest a financial news article with LLM-based entity extraction.
+    Extracts companies with tickers, sectors, regulators, and events.
+    """
     try:
         article = NewsArticle(
             id=article_input.id,
@@ -88,7 +173,7 @@ async def ingest_article(article_input: ArticleInput):
         return IngestResponse(
             success=True,
             article_id=article.id,
-            message="Article processed successfully",
+            message="Article processed successfully with LLM entity extraction",
             is_duplicate=stats.get("is_duplicate", False),
             duplicates_found=stats.get("duplicates_found", 0),
             entities_extracted=entities_stats,
@@ -101,7 +186,10 @@ async def ingest_article(article_input: ArticleInput):
                 "impact_breakdown": impact_breakdown,
                 "total_articles": stats.get("total_articles"),
                 "indexed": stats.get("indexed", False),
-                "sentiment_analyzed": stats.get("sentiment_analyzed", False)
+                "sentiment_analyzed": stats.get("sentiment_analyzed", False),
+                "tickers_extracted": stats.get("tickers_extracted", 0),
+                "avg_company_confidence": stats.get("avg_company_confidence"),
+                "extraction_reasoning": stats.get("extraction_reasoning")
             }
         )
     except Exception as e:
@@ -163,22 +251,34 @@ async def get_stats():
 
 @router.get("/article/{article_id}", tags=["Retrieval"])
 async def get_article(article_id: str):
+    """
+    Retrieve article by ID with rich entity data.
+    Returns extracted tickers and confidence scores.
+    """
     article = storage.get_by_id(article_id)
     if not article:
         raise HTTPException(status_code=404, detail="Article not found")
         
     sentiment_dict = article.sentiment if article.has_sentiment() else None
     
-    return ArticleOutput(
-        id=article.id,
-        title=article.title,
-        content=article.content,
-        source=article.source,
-        timestamp=article.timestamp.isoformat(),
-        entities=getattr(article, "entities", None),
-        impacted_stocks=getattr(article, "impacted_stocks", None),
-        sentiment=sentiment_dict
-    )
+    # Include rich entity data if available
+    response_data = {
+        "id": article.id,
+        "title": article.title,
+        "content": article.content,
+        "source": article.source,
+        "timestamp": article.timestamp.isoformat(),
+        "entities": article.entities,
+        "impacted_stocks": article.impacted_stocks,
+        "sentiment": sentiment_dict
+    }
+    
+    # Add rich entity data with tickers
+    if article.entities_rich:
+        response_data["entities_rich"] = article.entities_rich
+        response_data["company_tickers"] = article.get_company_tickers()
+    
+    return response_data
 
 @router.get("/article/{article_id}/sentiment", response_model=SentimentDetailResponse, tags=["Sentiment"])
 async def get_article_sentiment(article_id: str):
@@ -199,3 +299,24 @@ async def get_article_sentiment(article_id: str):
         analysis_method=data.analysis_method,
         timestamp=data.timestamp
     )
+
+@router.get("/article/{article_id}/entities", tags=["Entities"])
+async def get_article_entities(article_id: str):
+    """
+    Get detailed entity extraction data for an article.
+    Returns companies with tickers, confidence scores, and extraction reasoning.
+    """
+    article = storage.get_by_id(article_id)
+    if not article:
+        raise HTTPException(status_code=404, detail="Article not found")
+    
+    if not article.entities_rich:
+        raise HTTPException(status_code=404, detail="No entity data available")
+    
+    return {
+        "article_id": article.id,
+        "title": article.title,
+        "entities_rich": article.entities_rich,
+        "company_tickers": article.get_company_tickers(),
+        "extraction_method": "llm"
+    }
