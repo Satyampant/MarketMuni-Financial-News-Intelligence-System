@@ -124,13 +124,6 @@ api:
   description: "Multi-agent AI system with full LLM pipeline"
   version: "2.0.0"
 
-resources:
-  company_aliases: "company_aliases.json"
-  sector_tickers: "sector_tickers.json"
-  regulators: "regulators.json"
-  regulator_impact: "regulator_sector_impact.json"
-  supply_chain_graph: "supply_chain_graph.json"
-
 logging:
   level: "INFO"
   format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
