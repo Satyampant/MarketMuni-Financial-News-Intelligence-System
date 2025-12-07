@@ -8,7 +8,7 @@ redis:
   host: "localhost"
   port: 6379
   db: 0
-  password: null  # Set via REDIS_PASSWORD env var in production
+  password: password  # Set via REDIS_PASSWORD env var in production
   ttl_seconds: 86400  # 24 hours
   connection_pool:
     max_connections: 50

@@ -49,11 +49,13 @@ class RedisCacheService:
         config = get_config()
         
         # Load from config or use defaults
-        self.host = host or getattr(config, 'redis_host', 'localhost')
-        self.port = port or getattr(config, 'redis_port', 6379)
-        self.db = db or getattr(config, 'redis_db', 0)
-        self.password = password or getattr(config, 'redis_password', None)
-        self.ttl_seconds = ttl_seconds or getattr(config, 'redis_ttl_seconds', 86400)
+        redis_conf = config.redis  # Access the nested RedisConfig object
+        
+        self.host = host or redis_conf.host
+        self.port = port or redis_conf.port
+        self.db = db or redis_conf.db
+        self.password = password or redis_conf.password
+        self.ttl_seconds = ttl_seconds or redis_conf.ttl_seconds
         self.key_prefix = key_prefix
         
         self.client: Optional[redis.Redis] = None

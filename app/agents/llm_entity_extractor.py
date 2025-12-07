@@ -157,8 +157,8 @@ class LLMEntityExtractor:
         """Validate ticker symbol format."""
         if not ticker or len(ticker) < 1:
             return False
-        pattern = r'^[A-Z]{1,10}$'
-        return bool(re.match(pattern, ticker.upper()))
+        pattern = r'^(?=.*[A-Z])[A-Z0-9]{1,12}$'
+        return bool(re.match(pattern, ticker))
     
     def _normalize_company_name(self, name: str) -> str:
         """Normalize company name using fuzzy matching."""
