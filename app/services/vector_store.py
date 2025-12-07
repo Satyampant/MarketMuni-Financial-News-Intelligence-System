@@ -294,3 +294,183 @@ class VectorStore:
             name=self.collection_name,
             metadata={"hnsw:space": "cosine"}
         )
+
+    """
+    VectorStore - Single Source of Truth for Embeddings
+    File: app/services/vector_store.py (embedding-related methods only)
+    """
+
+    # Add this method to your existing VectorStore class:
+
+    def create_embedding(self, text: str) -> List[float]:
+        """
+        Generate embedding for text using the configured model.
+        
+        IMPORTANT: This is the ONLY place embeddings should be created.
+        All other components (DeduplicationAgent, etc.) should use embeddings
+        from this method to ensure consistency.
+        
+        Args:
+            text: Text to embed
+            
+        Returns:
+            Embedding as list of floats
+        """
+        embedding = self.embedding_model.encode(text, convert_to_numpy=True)
+        return embedding.tolist()
+
+
+    def index_article(
+        self,
+        article: NewsArticle,
+        embedding: Optional[List[float]] = None
+    ) -> None:
+        """
+        Index article with enriched metadata.
+        
+        Args:
+            article: Article to index
+            embedding: Pre-computed embedding (OPTIMIZATION: reuse if provided)
+        """
+        text = f"{article.title}. {article.content}"
+        
+        # OPTIMIZATION: Reuse embedding if provided, otherwise compute
+        if embedding is None:
+            embedding = self.create_embedding(text)
+        
+        # Prepare metadata (rest of your existing logic)
+        metadata = {
+            "article_id": article.id,
+            "title": article.title,
+            "source": article.source,
+            "timestamp": article.timestamp.isoformat(),
+            "entities": json.dumps(getattr(article, "entities", {})),
+            "impacted_stocks": json.dumps([
+                {
+                    "symbol": stock["symbol"],
+                    "confidence": stock["confidence"],
+                    "impact_type": stock["impact_type"]
+                }
+                for stock in article.impacted_stocks
+            ])
+        }
+        
+        # Handle Sentiment Data
+        if article.has_sentiment():
+            sentiment_data = article.sentiment
+            metadata["sentiment"] = json.dumps(sentiment_data)
+            metadata["sentiment_classification"] = sentiment_data.get("classification", "Neutral")
+            metadata["sentiment_confidence"] = sentiment_data.get("confidence_score", 0.0)
+            metadata["sentiment_signal_strength"] = sentiment_data.get("signal_strength", 0.0)
+            metadata["sentiment_method"] = sentiment_data.get("analysis_method", "unknown")
+        else:
+            metadata["sentiment"] = json.dumps(None)
+            metadata["sentiment_classification"] = "Unknown"
+            metadata["sentiment_confidence"] = 0.0
+            metadata["sentiment_signal_strength"] = 0.0
+            metadata["sentiment_method"] = "not_analyzed"
+        
+        # Handle Cross-Impact Data
+        if hasattr(article, 'cross_impacts') and article.cross_impacts:
+            metadata["cross_impacts"] = json.dumps(article.cross_impacts)
+            metadata["has_cross_impacts"] = True
+            metadata["cross_impact_count"] = len(article.cross_impacts)
+            
+            target_sectors = list(set(
+                impact.get("target_sector", "") 
+                for impact in article.cross_impacts
+            ))
+            metadata["cross_impact_sectors"] = json.dumps(target_sectors)
+            
+            metadata["max_cross_impact_score"] = max(
+                (impact.get("impact_score", 0.0) for impact in article.cross_impacts),
+                default=0.0
+            )
+        else:
+            metadata["cross_impacts"] = json.dumps([])
+            metadata["has_cross_impacts"] = False
+            metadata["cross_impact_count"] = 0
+            metadata["cross_impact_sectors"] = json.dumps([])
+            metadata["max_cross_impact_score"] = 0.0
+        
+        # Index in ChromaDB
+        self.collection.add(
+            ids=[article.id],
+            embeddings=[embedding],
+            documents=[text],
+            metadatas=[metadata]
+        )
+
+
+    def search(
+        self,
+        query: str,
+        top_k: int = 10,
+        query_embedding: Optional[List[float]] = None,
+        where: Optional[Dict[str, Any]] = None,
+        sentiment_filter: Optional[str] = None,
+        include_cross_impacts: bool = True
+    ) -> List[Dict[str, Any]]:
+        """
+        Search for articles with optional metadata filtering.
+        
+        Args:
+            query: Query text (ignored if query_embedding provided)
+            top_k: Number of results to return
+            query_embedding: Pre-computed query embedding (OPTIMIZATION)
+            where: Metadata filters
+            sentiment_filter: Filter by sentiment classification
+            include_cross_impacts: Include cross-impact data in results
+            
+        Returns:
+            List of matching articles with metadata
+        """
+        # OPTIMIZATION: Use provided embedding or compute
+        if query_embedding is None and query:
+            query_embedding = self.create_embedding(query)
+        
+        if query_embedding is None:
+            raise ValueError("Either query text or query_embedding must be provided")
+        
+        # Apply sentiment filtering if requested
+        if sentiment_filter and where is None:
+            where = {"sentiment_classification": sentiment_filter}
+        elif sentiment_filter and where:
+            where["sentiment_classification"] = sentiment_filter
+        
+        results = self.collection.query(
+            query_embeddings=[query_embedding],
+            n_results=top_k,
+            where=where,
+            include=["documents", "metadatas", "distances"]
+        )
+        
+        formatted_results = []
+        for i in range(len(results["ids"][0])):
+            result = {
+                "article_id": results["ids"][0][i],
+                "document": results["documents"][0][i],
+                "metadata": results["metadatas"][0][i],
+                "distance": results["distances"][0][i],
+                "similarity": 1 - results["distances"][0][i]
+            }
+            
+            # Rehydrate JSON strings back to Python objects
+            if "entities" in result["metadata"]:
+                result["metadata"]["entities"] = json.loads(result["metadata"]["entities"])
+            if "impacted_stocks" in result["metadata"]:
+                result["metadata"]["impacted_stocks"] = json.loads(result["metadata"]["impacted_stocks"])
+            if "sentiment" in result["metadata"]:
+                sentiment_json = result["metadata"]["sentiment"]
+                result["metadata"]["sentiment"] = json.loads(sentiment_json) if sentiment_json != "null" else None
+            
+            if include_cross_impacts and "cross_impacts" in result["metadata"]:
+                cross_impacts_json = result["metadata"]["cross_impacts"]
+                result["metadata"]["cross_impacts"] = json.loads(cross_impacts_json) if cross_impacts_json else []
+                
+                if "cross_impact_sectors" in result["metadata"]:
+                    result["metadata"]["cross_impact_sectors"] = json.loads(result["metadata"]["cross_impact_sectors"])
+            
+            formatted_results.append(result)
+        
+        return formatted_results

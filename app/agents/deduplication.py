@@ -1,99 +1,154 @@
+"""
+Fixed Deduplication Agent - No Dual Models
+VectorStore is the single source of truth for embeddings.
+File: app/agents/deduplication.py
+"""
+
 from typing import List, Optional, Tuple
 import numpy as np
-from sentence_transformers import SentenceTransformer, CrossEncoder
-from sklearn.metrics.pairwise import cosine_similarity
+from sentence_transformers import CrossEncoder
+
 from app.core.models import NewsArticle
 from app.core.config_loader import get_config
 
+
 class DeduplicationAgent:
     """
-    Implements a two-stage semantic deduplication pipeline:
-    1. Bi-Encoder: Fast candidate retrieval via cosine similarity.
-    2. Cross-Encoder: High-precision duplicate verification.
+    Two-stage semantic deduplication pipeline optimized for large-scale datasets.
+    
+    ARCHITECTURE PRINCIPLES:
+    1. VectorStore owns all embedding generation (single source of truth)
+    2. DeduplicationAgent focuses only on similarity logic and cross-encoder verification
+    3. Embeddings are computed once and reused across ingestion pipeline
+    
+    Pipeline:
+    1. Vector Search (ChromaDB): Fast O(log N) candidate retrieval using ANN
+    2. Cross-Encoder: High-precision verification on top-K candidates only
     """
     
     def __init__(
         self, 
-        bi_encoder_threshold: float = None,
-        cross_encoder_threshold: float = None
+        cross_encoder_threshold: float = None,
+        candidate_pool_size: int = 10
     ):
-        config = get_config()
-    
-        # Prioritize explicit args over config defaults
-        self.bi_threshold = bi_encoder_threshold or config.deduplication.bi_encoder_threshold
-        self.cross_threshold = cross_encoder_threshold or config.deduplication.cross_encoder_threshold
+        """
+        Initialize deduplication agent.
         
-        self.embedding_model = SentenceTransformer(config.deduplication.bi_encoder_model)
+        IMPORTANT: No embedding model here - VectorStore handles that.
+        
+        Args:
+            cross_encoder_threshold: Minimum probability for duplicate verification
+            candidate_pool_size: Number of candidates to retrieve from vector DB
+        """
+        config = get_config()
+        
+        self.cross_threshold = cross_encoder_threshold or config.deduplication.cross_encoder_threshold
+        self.candidate_pool_size = candidate_pool_size
+        
+        # Only initialize cross-encoder (not bi-encoder)
         self.cross_encoder = CrossEncoder(config.deduplication.cross_encoder_model)
         
-        self.embeddings_cache = {}
+        print(f"✓ DeduplicationAgent initialized (Vector Search Optimized)")
+        print(f"  - Candidate pool size: {self.candidate_pool_size}")
+        print(f"  - Cross-encoder threshold: {self.cross_threshold}")
+        print(f"  - Embedding model: Delegated to VectorStore")
     
     def _prepare_text(self, article: NewsArticle) -> str:
+        """Prepare article text for comparison."""
         return f"{article.title}. {article.content}"
     
-    def _get_embedding(self, article: NewsArticle) -> np.ndarray:
-        if article.id not in self.embeddings_cache:
-            text = self._prepare_text(article)
-            self.embeddings_cache[article.id] = self.embedding_model.encode(
-                text, 
-                convert_to_numpy=True,
-                show_progress_bar=False
-            )
-        return self.embeddings_cache[article.id]
-    
-    def get_cached_embedding(self, article_id: str) -> Optional[np.ndarray]:
-        return self.embeddings_cache.get(article_id)
-    
-    def clear_cache(self) -> None:
-        self.embeddings_cache.clear()
-    
-    def find_duplicates(self, article: NewsArticle, existing_articles: List[NewsArticle]) -> List[str]:
-        if not existing_articles:
+    def find_duplicates_with_vector_search(
+        self,
+        article: NewsArticle,
+        article_embedding: List[float],
+        vector_store: 'VectorStore'
+    ) -> List[str]:
+        """
+        Find duplicate articles using vector search + cross-encoder verification.
+        
+        OPTIMIZED APPROACH:
+        - Stage 1: Use ChromaDB vector search to retrieve top-K similar candidates (fast)
+        - Stage 2: Apply cross-encoder only on these candidates (precise)
+        
+        Args:
+            article: New article to check for duplicates
+            article_embedding: Pre-computed embedding from VectorStore (REUSED)
+            vector_store: ChromaDB vector store instance
+            
+        Returns:
+            List of duplicate article IDs
+        """
+        # STAGE 1: Vector Search (ANN - Approximate Nearest Neighbors)
+        # Query ChromaDB for top-K most similar articles
+        # This is O(log N) with HNSW indexing
+        candidates = vector_store.search(
+            query="",  # Empty query since we provide embedding directly
+            top_k=self.candidate_pool_size,
+            query_embedding=article_embedding
+        )
+        
+        # Note: bi_encoder_threshold filtering is handled by ChromaDB's similarity scoring
+        # We only get back candidates that are reasonably similar
+        
+        if not candidates:
             return []
         
-        # Stage 1: Bi-Encoder (Fast Filtering)
-        article_emb = self._get_embedding(article).reshape(1, -1)
-        existing_embs = np.array([
-            self._get_embedding(a) for a in existing_articles
-        ])
-        
-        bi_scores = cosine_similarity(article_emb, existing_embs)[0]
-        candidate_indices = np.where(bi_scores >= self.bi_threshold)[0]
-        
-        if len(candidate_indices) == 0:
-            return []
-        
-        # Stage 2: Cross-Encoder (Precision Verification)
-        candidates = [existing_articles[i] for i in candidate_indices]
-        
+        # STAGE 2: Cross-Encoder Verification (Precision Check)
+        # Only run expensive model on the small pool of candidates
         article_text = self._prepare_text(article)
-        pairs = [[article_text, self._prepare_text(cand)] for cand in candidates]
         
+        pairs = []
+        candidate_ids = []
+        
+        for candidate in candidates:
+            # Skip self-match
+            candidate_id = candidate["metadata"]["article_id"]
+            if candidate_id == article.id:
+                continue
+                
+            # Skip candidates below vector search threshold
+            # ChromaDB returns similarity (1 - cosine_distance)
+            similarity = candidate.get("similarity", 0.0)
+            
+            # Use config threshold or reasonable default
+            config = get_config()
+            min_similarity = config.deduplication.bi_encoder_threshold
+            
+            if similarity < min_similarity:
+                continue
+                
+            candidate_text = candidate["document"]
+            pairs.append([article_text, candidate_text])
+            candidate_ids.append(candidate_id)
+        
+        if not pairs:
+            return []
+        
+        # Run cross-encoder on candidate pairs
         cross_scores = self.cross_encoder.predict(
             pairs,
             show_progress_bar=False,
             convert_to_numpy=True
         )
         
-        # Filter based on final probability threshold
+        # Filter by cross-encoder threshold
         duplicate_ids = [
-            candidates[idx].id 
+            candidate_ids[idx] 
             for idx, score in enumerate(cross_scores) 
             if score >= self.cross_threshold
         ]
         
         return duplicate_ids
     
-    def find_duplicates_batch(self, articles: List[NewsArticle], existing_articles: List[NewsArticle]) -> dict[str, List[str]]:
-        results = {}
-        for article in articles:
-            results[article.id] = self.find_duplicates(article, existing_articles)
-        return results
-    
     def consolidate_duplicates(self, articles: List[NewsArticle]) -> NewsArticle:
         """
-        Merges duplicates, keeping the earliest article (by timestamp) as primary
-        and aggregating unique sources.
+        Merge duplicate articles, keeping earliest as primary and aggregating sources.
+        
+        Args:
+            articles: List of duplicate articles to consolidate
+            
+        Returns:
+            Consolidated primary article
         """
         if not articles:
             raise ValueError("Cannot consolidate empty article list")
@@ -101,14 +156,16 @@ class DeduplicationAgent:
         if len(articles) == 1:
             return articles[0]
         
+        # Sort by timestamp (earliest first)
         sorted_articles = sorted(articles, key=lambda x: x.timestamp)
         primary = sorted_articles[0]
         
+        # Aggregate unique sources
         seen_sources = set()
         unique_sources = []
         
         for article in sorted_articles:
-            # Normalize and split potentially comma-separated sources
+            # Handle comma-separated sources
             sources = [s.strip() for s in article.source.split(',')]
             for source in sources:
                 if source not in seen_sources:
@@ -119,18 +176,53 @@ class DeduplicationAgent:
         
         return primary
     
-    def get_similarity_scores(self, article1: NewsArticle, article2: NewsArticle) -> Tuple[float, float]:
-        """Returns (bi_encoder_score, cross_encoder_score) for debugging/analysis."""
-        emb1 = self._get_embedding(article1).reshape(1, -1)
-        emb2 = self._get_embedding(article2).reshape(1, -1)
-        bi_score = cosine_similarity(emb1, emb2)[0][0]
+    def verify_similarity(
+        self, 
+        article1_text: str, 
+        article2_text: str
+    ) -> float:
+        """
+        Calculate cross-encoder similarity score between two article texts.
         
-        text1 = self._prepare_text(article1)
-        text2 = self._prepare_text(article2)
-        cross_score = self.cross_encoder.predict(
-            [[text1, text2]],
+        Args:
+            article1_text: First article text
+            article2_text: Second article text
+            
+        Returns:
+            Cross-encoder similarity score (0-1)
+        """
+        score = self.cross_encoder.predict(
+            [[article1_text, article2_text]],
             show_progress_bar=False,
             convert_to_numpy=True
         )[0]
         
-        return float(bi_score), float(cross_score)
+        return float(score)
+
+
+# Utility function for batch deduplication
+def find_duplicates_batch(
+    articles_with_embeddings: List[Tuple[NewsArticle, List[float]]],
+    vector_store: 'VectorStore',
+    dedup_agent: DeduplicationAgent
+) -> dict:
+    """
+    Batch process multiple articles for duplicate detection.
+    
+    Args:
+        articles_with_embeddings: List of (article, embedding) tuples
+        vector_store: Vector store instance
+        dedup_agent: Deduplication agent instance
+        
+    Returns:
+        Dict mapping article IDs to their duplicate IDs
+    """
+    results = {}
+    for article, embedding in articles_with_embeddings:
+        duplicates = dedup_agent.find_duplicates_with_vector_search(
+            article, 
+            embedding,
+            vector_store
+        )
+        results[article.id] = duplicates
+    return results

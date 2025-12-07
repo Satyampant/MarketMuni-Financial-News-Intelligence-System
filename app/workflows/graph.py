@@ -26,6 +26,7 @@ class NewsIntelligenceState(TypedDict):
     """State definition for the news processing pipeline."""
     articles: Annotated[List[NewsArticle], operator.add]
     current_article: Optional[NewsArticle]
+    article_embedding: Optional[List[float]] 
     duplicates: Annotated[List[str], operator.add]
     entities_schema: Optional[EntityExtractionSchema]
     entities: Optional[dict]
@@ -129,7 +130,10 @@ class NewsIntelligenceGraph:
         return query_graph.compile()
     
     def _ingestion_agent(self, state: NewsIntelligenceState) -> dict:
-        """Validates and prepares the article object."""
+        """
+        Validates article and GENERATES EMBEDDING (single source of truth).
+        This embedding is passed through the entire pipeline.
+        """
         article = state.get("current_article")
         
         if not article:
@@ -139,39 +143,76 @@ class NewsIntelligenceGraph:
             return {"error": "Article missing required fields"}
         
         if isinstance(article.timestamp, str):
+            from datetime import datetime
             article.timestamp = datetime.fromisoformat(article.timestamp)
+        
+        article_embedding = self.vector_store.create_embedding(
+            f"{article.title}. {article.content}"
+        )
         
         return {
             "current_article": article,
+            "article_embedding": article_embedding,  # Pass to next nodes
             "stats": {
                 "ingestion_time": datetime.now().isoformat(),
-                "article_id": article.id
+                "article_id": article.id,
+                "embedding_computed": True
             }
         }
     
     def _deduplication_agent(self, state: NewsIntelligenceState) -> dict:
-        """Checks for existing articles and consolidates if duplicates found."""
+        """
+        FIXED: Uses pre-computed embedding from state.
+        No redundant computation. No dual models.
+        """
         article = state["current_article"]
-        existing_articles = self.storage.get_all_articles()
+        article_embedding = state.get("article_embedding")
         
-        duplicate_ids = self.dedup_agent.find_duplicates(article, existing_articles)
+        if not article_embedding:
+            # Fallback: compute if not in state (shouldn't happen)
+            print("⚠ Warning: Embedding not found in state, computing...")
+            article_embedding = self.vector_store.create_embedding(
+                f"{article.title}. {article.content}"
+            )
+        
+        # Use vector search with pre-computed embedding
+        try:
+            duplicate_ids = self.dedup_agent.find_duplicates_with_vector_search(
+                article,
+                article_embedding,  # REUSE embedding
+                self.vector_store
+            )
+        except Exception as e:
+            # Graceful fallback for empty DB or errors
+            print(f"⚠ Vector search failed: {e}")
+            duplicate_ids = []
         
         stats = state.get("stats", {})
         stats["duplicates_found"] = len(duplicate_ids)
         stats["is_duplicate"] = len(duplicate_ids) > 0
+        stats["deduplication_method"] = "vector_search"
         
         if duplicate_ids:
+            # Fetch only the duplicate articles (not all articles)
             duplicates = [self.storage.get_by_id(dup_id) for dup_id in duplicate_ids]
+            duplicates = [d for d in duplicates if d is not None]  # Filter None
             duplicates.append(article)
+            
+            # Consolidate duplicates (keep earliest, merge sources)
             consolidated = self.dedup_agent.consolidate_duplicates(duplicates)
             
             return {
                 "current_article": consolidated,
+                "article_embedding": article_embedding,  # Keep passing it
                 "duplicates": duplicate_ids,
                 "stats": stats
             }
         
-        return {"duplicates": [], "stats": stats}
+        return {
+            "article_embedding": article_embedding,  # Keep passing it
+            "duplicates": [], 
+            "stats": stats
+        }
     
     def _entity_extraction_agent(self, state: NewsIntelligenceState) -> dict:
         """Extracts entities using LLM with structured output."""
@@ -405,16 +446,28 @@ class NewsIntelligenceGraph:
         }
     
     def _indexing_agent(self, state: NewsIntelligenceState) -> dict:
-        """Persists the article in storage and vector database."""
+        """
+        FIXED: Reuses pre-computed embedding instead of recalculating.
+        """
         article = state["current_article"]
+        article_embedding = state.get("article_embedding")
         
+        # Store article in memory storage
         self.storage.add_article(article)
-        self.vector_store.index_article(article)
+        
+        # Index with pre-computed embedding (no redundant computation)
+        if article_embedding:
+            self.vector_store.index_article(article, embedding=article_embedding)
+        else:
+            # Fallback: compute if not in state
+            print("⚠ Warning: Embedding not found at indexing, computing...")
+            self.vector_store.index_article(article)
         
         stats = state.get("stats", {})
         stats["indexed"] = True
         stats["total_articles"] = self.storage.article_count()
         stats["vector_store_count"] = self.vector_store.count()
+        stats["embedding_reused"] = article_embedding is not None
         
         return {
             "articles": [article],
@@ -458,6 +511,7 @@ class NewsIntelligenceGraph:
         initial_state = {
             "articles": [],
             "current_article": article,
+            "article_embedding": None,
             "duplicates": [],
             "entities_schema": None,
             "entities": None,
