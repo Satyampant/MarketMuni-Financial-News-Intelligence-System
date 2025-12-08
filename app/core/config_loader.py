@@ -11,6 +11,45 @@ from dataclasses import dataclass, field
 # Resolve project root relative to this file
 ROOT_DIR = Path(__file__).resolve().parent.parent.parent
 CONFIG_FILE = ROOT_DIR / "config.yaml"
+PROMPTS_FILE = ROOT_DIR / "prompts.yaml"
+
+@dataclass
+class EntityExtractionPrompts:
+    system_message: str = ""
+    task_prompt: str = ""
+    entity_context_format: str = ""
+
+@dataclass
+class SentimentAnalysisPrompts:
+    system_message: str = ""
+    task_prompt: str = ""
+    few_shot_examples: str = ""
+
+@dataclass
+class StockMappingPrompts:
+    system_message: str = ""
+    task_prompt: str = ""
+
+@dataclass
+class SupplyChainPrompts:
+    system_message: str = ""
+    few_shot_examples: str = ""
+    task_prompt: str = ""
+
+@dataclass
+class QueryRoutingPrompts:
+    system_message: str = ""
+    few_shot_examples: str = ""
+    task_prompt: str = ""
+
+@dataclass
+class PromptConfig:
+    """Prompt templates configuration."""
+    entity_extraction: EntityExtractionPrompts = field(default_factory=dict)
+    sentiment_analysis: SentimentAnalysisPrompts = field(default_factory=dict)
+    stock_impact: StockMappingPrompts = field(default_factory=dict)
+    supply_chain: SupplyChainPrompts = field(default_factory=dict)
+    query_routing: QueryRoutingPrompts = field(default_factory=dict)
 
 @dataclass
 class RedisConfig:
@@ -216,6 +255,7 @@ class Config:
     logging: LoggingConfig = field(default_factory=LoggingConfig)
     performance: PerformanceConfig = field(default_factory=PerformanceConfig)
     development: DevelopmentConfig = field(default_factory=DevelopmentConfig)
+    prompts: PromptConfig = field(default_factory=PromptConfig)
 
 
 def load_config(config_path: Optional[Path] = None) -> Config:
@@ -223,270 +263,278 @@ def load_config(config_path: Optional[Path] = None) -> Config:
     if config_path is None:
         config_path = CONFIG_FILE
     
-    if not config_path.exists():
-        print(f"⚠ Warning: Config file not found at {config_path}")
-        print("  Using default configuration values")
-        return Config()
-    
     try:
         with open(config_path, 'r') as f:
             yaml_data = yaml.safe_load(f)
         
-        if yaml_data is None:
-            print("⚠ Warning: Empty config file, using defaults")
-            return Config()
-        
         config = Config()
         
         # --- Deduplication ---
-        if 'deduplication' in yaml_data:
-            dedup = yaml_data['deduplication']
-            config.deduplication = DeduplicationConfig(
-                bi_encoder_threshold=dedup.get('bi_encoder_threshold', 0.50),
-                cross_encoder_threshold=dedup.get('cross_encoder_threshold', 0.70),
-                bi_encoder_model=dedup.get('bi_encoder_model', 'all-mpnet-base-v2'),
-                cross_encoder_model=dedup.get('cross_encoder_model', 'cross-encoder/stsb-distilroberta-base')
-            )
+        dedup = yaml_data['deduplication']
+        config.deduplication = DeduplicationConfig(
+            bi_encoder_threshold=dedup.get('bi_encoder_threshold', 0.50),
+            cross_encoder_threshold=dedup.get('cross_encoder_threshold', 0.70),
+            bi_encoder_model=dedup.get('bi_encoder_model', 'all-mpnet-base-v2'),
+            cross_encoder_model=dedup.get('cross_encoder_model', 'cross-encoder/stsb-distilroberta-base')
+        )
         
         # --- Entity Extraction ---
-        if 'entity_extraction' in yaml_data:
-            entity = yaml_data['entity_extraction']
-            config.entity_extraction = EntityExtractionConfig(
-                spacy_model=entity.get('spacy_model', 'en_core_web_sm'),
-                use_spacy=entity.get('use_spacy', True),
-                event_keywords=entity.get('event_keywords', [])
-            )
+        entity = yaml_data['entity_extraction']
+        config.entity_extraction = EntityExtractionConfig(
+            spacy_model=entity.get('spacy_model', 'en_core_web_sm'),
+            use_spacy=entity.get('use_spacy', True),
+            event_keywords=entity.get('event_keywords', [])
+        )
         
         # --- Sentiment Analysis ---
-        if 'sentiment_analysis' in yaml_data:
-            sentiment = yaml_data['sentiment_analysis']
-            
-            hybrid_weights = HybridWeights()
-            if 'hybrid_weights' in sentiment:
-                hw = sentiment['hybrid_weights']
-                hybrid_weights = HybridWeights(
-                    finbert_weight=hw.get('finbert_weight', 0.7),
-                    rule_weight=hw.get('rule_weight', 0.3)
-                )
-            
-            finbert_config = FinBERTConfig()
-            if 'finbert' in sentiment:
-                fb = sentiment['finbert']
-                finbert_config = FinBERTConfig(
-                    model_name=fb.get('model_name', 'ProsusAI/finbert'),
-                    device=fb.get('device')
-                )
-            
-            rule_config = RuleBasedConfig()
-            if 'rule_based' in sentiment:
-                rb = sentiment['rule_based']
-                rule_config = RuleBasedConfig(
-                    spacy_model=rb.get('spacy_model', 'en_core_web_sm'),
-                    use_spacy=rb.get('use_spacy', True)
-                )
-            
-            config.sentiment_analysis = SentimentAnalysisConfig(
-                method=sentiment.get('method', 'hybrid'),
-                hybrid_weights=hybrid_weights,
-                finbert=finbert_config,
-                rule_based=rule_config,
-                entity_weights=sentiment.get('entity_weights', {}),
-                event_modifiers=sentiment.get('event_modifiers', {})
-            )
+        sentiment = yaml_data['sentiment_analysis']
         
+        hybrid_weights = HybridWeights()
+        hw = sentiment['hybrid_weights']
+        hybrid_weights = HybridWeights(
+            finbert_weight=hw.get('finbert_weight', 0.7),
+            rule_weight=hw.get('rule_weight', 0.3)
+        )
+        
+        finbert_config = FinBERTConfig()
+        fb = sentiment['finbert']
+        finbert_config = FinBERTConfig(
+            model_name=fb.get('model_name', 'ProsusAI/finbert'),
+            device=fb.get('device')
+        )
+        
+        rule_config = RuleBasedConfig()
+        rb = sentiment['rule_based']
+        rule_config = RuleBasedConfig(
+            spacy_model=rb.get('spacy_model', 'en_core_web_sm'),
+            use_spacy=rb.get('use_spacy', True)
+        )
+        
+        config.sentiment_analysis = SentimentAnalysisConfig(
+            method=sentiment.get('method', 'hybrid'),
+            hybrid_weights=hybrid_weights,
+            finbert=finbert_config,
+            rule_based=rule_config,
+            entity_weights=sentiment.get('entity_weights', {}),
+            event_modifiers=sentiment.get('event_modifiers', {})
+        )
+    
         # --- Vector Store ---
-        if 'vector_store' in yaml_data:
-            vs = yaml_data['vector_store']
-            config.vector_store = VectorStoreConfig(
-                collection_name=vs.get('collection_name', 'financial_news'),
-                persist_directory=vs.get('persist_directory', 'data/chroma_db'),
-                embedding_model=vs.get('embedding_model', 'all-mpnet-base-v2'),
-                distance_metric=vs.get('distance_metric', 'cosine')
+        vs = yaml_data['vector_store']
+        config.vector_store = VectorStoreConfig(
+            collection_name=vs.get('collection_name', 'financial_news'),
+            persist_directory=vs.get('persist_directory', 'data/chroma_db'),
+            embedding_model=vs.get('embedding_model', 'all-mpnet-base-v2'),
+            distance_metric=vs.get('distance_metric', 'cosine')
+        )
+        
+        # --- Query Processing  ---
+        qp = yaml_data['query_processing']
+        
+        # LLM Routing Config
+        llm_routing = LLMRoutingConfig()
+        lr = qp['llm_routing']
+        llm_routing = LLMRoutingConfig(
+            enabled=lr.get('enabled', True),
+            confidence_threshold=lr.get('confidence_threshold', 0.6),
+            fallback_strategy=lr.get('fallback_strategy', 'semantic_search'),
+            max_entities_per_query=lr.get('max_entities_per_query', 10),
+            enable_query_expansion=lr.get('enable_query_expansion', True)
+        )
+        
+        # Strategy Weights
+        strategy_weights = qp.get('strategy_weights', {})
+        
+        multi_query = MultiQueryConfig()
+        mq = qp['multi_query']
+        multi_query = MultiQueryConfig(
+            max_context_queries=mq.get('max_context_queries', 3),
+            initial_retrieval_multiplier=mq.get('initial_retrieval_multiplier', 2)
+        )
+        
+        reranking_weights = {}
+        for strategy, weights in qp['reranking_weights'].items():
+            reranking_weights[strategy] = RerankingWeights(
+                strategy_weight=weights.get('strategy_weight', 0.5),
+                semantic_weight=weights.get('semantic_weight', 0.5)
             )
         
-        # --- Query Processing (UPDATED WITH LLM ROUTING) ---
-        if 'query_processing' in yaml_data:
-            qp = yaml_data['query_processing']
-            
-            # LLM Routing Config
-            llm_routing = LLMRoutingConfig()
-            if 'llm_routing' in qp:
-                lr = qp['llm_routing']
-                llm_routing = LLMRoutingConfig(
-                    enabled=lr.get('enabled', True),
-                    confidence_threshold=lr.get('confidence_threshold', 0.6),
-                    fallback_strategy=lr.get('fallback_strategy', 'semantic_search'),
-                    max_entities_per_query=lr.get('max_entities_per_query', 10),
-                    enable_query_expansion=lr.get('enable_query_expansion', True)
-                )
-            
-            # Strategy Weights
-            strategy_weights = qp.get('strategy_weights', {})
-            
-            multi_query = MultiQueryConfig()
-            if 'multi_query' in qp:
-                mq = qp['multi_query']
-                multi_query = MultiQueryConfig(
-                    max_context_queries=mq.get('max_context_queries', 3),
-                    initial_retrieval_multiplier=mq.get('initial_retrieval_multiplier', 2)
-                )
-            
-            reranking_weights = {}
-            if 'reranking_weights' in qp:
-                for strategy, weights in qp['reranking_weights'].items():
-                    reranking_weights[strategy] = RerankingWeights(
-                        strategy_weight=weights.get('strategy_weight', 0.5),
-                        semantic_weight=weights.get('semantic_weight', 0.5)
-                    )
-            
-            sentiment_boost = SentimentBoostConfig()
-            if 'sentiment_boost' in qp:
-                sb = qp['sentiment_boost']
-                sentiment_boost = SentimentBoostConfig(
-                    enabled=sb.get('enabled', True),
-                    max_multiplier=sb.get('max_multiplier', 1.5)
-                )
-            
-            config.query_processing = QueryProcessingConfig(
-                default_top_k=qp.get('default_top_k', 10),
-                min_similarity=qp.get('min_similarity', 0.3),
-                llm_routing=llm_routing,
-                strategy_weights=strategy_weights,
-                multi_query=multi_query,
-                reranking_weights=reranking_weights,
-                sentiment_boost=sentiment_boost
-            )
+        sentiment_boost = SentimentBoostConfig()
+        sb = qp['sentiment_boost']
+        sentiment_boost = SentimentBoostConfig(
+            enabled=sb.get('enabled', True),
+            max_multiplier=sb.get('max_multiplier', 1.5)
+        )
+        
+        config.query_processing = QueryProcessingConfig(
+            default_top_k=qp.get('default_top_k', 10),
+            min_similarity=qp.get('min_similarity', 0.3),
+            llm_routing=llm_routing,
+            strategy_weights=strategy_weights,
+            multi_query=multi_query,
+            reranking_weights=reranking_weights,
+            sentiment_boost=sentiment_boost
+        )
         
         # --- Stock Impact ---
-        if 'stock_impact' in yaml_data:
-            si = yaml_data['stock_impact']
-            config.stock_impact = StockImpactConfig(
-                confidence_thresholds=si.get('confidence_thresholds', {}),
-                fuzzy_match_threshold=si.get('fuzzy_match_threshold', 0.80)
-            )
+        si = yaml_data['stock_impact']
+        config.stock_impact = StockImpactConfig(
+            confidence_thresholds=si.get('confidence_thresholds', {}),
+            fuzzy_match_threshold=si.get('fuzzy_match_threshold', 0.80)
+        )
         
         # --- Supply Chain ---
-        if 'supply_chain' in yaml_data:
-            sc = yaml_data['supply_chain']
-            config.supply_chain = SupplyChainConfig(
-                traversal_depth=sc.get('traversal_depth', 1),
-                min_impact_score=sc.get('min_impact_score', 25.0),
-                weight_decay=sc.get('weight_decay', 0.8)
-            )
+        sc = yaml_data['supply_chain']
+        config.supply_chain = SupplyChainConfig(
+            traversal_depth=sc.get('traversal_depth', 1),
+            min_impact_score=sc.get('min_impact_score', 25.0),
+            weight_decay=sc.get('weight_decay', 0.8)
+        )
         
         # --- LLM Configuration ---
-        if 'llm' in yaml_data:
-            llm = yaml_data['llm']
-            
-            models_config = LLMModelsConfig()
-            if 'models' in llm:
-                m = llm['models']
-                models_config = LLMModelsConfig(
-                    fast=m.get('fast', 'llama-3.1-8b-instant'),
-                    reasoning=m.get('reasoning', 'llama-3.3-70b-versatile'),
-                    structured=m.get('structured', 'llama-3.3-70b-versatile')
-                )
-            
-            features_config = LLMFeaturesConfig()
-            if 'features' in llm:
-                f = llm['features']
-                features_config = LLMFeaturesConfig(
-                    entity_extraction=f.get('entity_extraction', True),
-                    stock_mapping=f.get('stock_mapping', True),
-                    sentiment_analysis=f.get('sentiment_analysis', True),
-                    supply_chain=f.get('supply_chain', True),
-                    query_expansion=f.get('query_expansion', True)
-                )
-            
-            config.llm = LLMConfig(
-                provider=llm.get('provider', 'groq'),
-                model=llm.get('model', 'llama-3.3-70b-versatile'),
-                temperature=llm.get('temperature', 0.1),
-                max_tokens=llm.get('max_tokens', 4096),
-                timeout=llm.get('timeout', 30),
-                max_retries=llm.get('max_retries', 3),
-                models=models_config,
-                features=features_config
-            )
+        llm = yaml_data['llm']
+        
+        models_config = LLMModelsConfig()
+        m = llm['models']
+        models_config = LLMModelsConfig(
+            fast=m.get('fast', 'llama-3.1-8b-instant'),
+            reasoning=m.get('reasoning', 'llama-3.3-70b-versatile'),
+            structured=m.get('structured', 'llama-3.3-70b-versatile')
+        )
+        
+        features_config = LLMFeaturesConfig()
+        f = llm['features']
+        features_config = LLMFeaturesConfig(
+            entity_extraction=f.get('entity_extraction', True),
+            stock_mapping=f.get('stock_mapping', True),
+            sentiment_analysis=f.get('sentiment_analysis', True),
+            supply_chain=f.get('supply_chain', True),
+            query_expansion=f.get('query_expansion', True)
+        )
+        
+        config.llm = LLMConfig(
+            provider=llm.get('provider', 'groq'),
+            model=llm.get('model', 'llama-3.3-70b-versatile'),
+            temperature=llm.get('temperature', 0.1),
+            max_tokens=llm.get('max_tokens', 4096),
+            timeout=llm.get('timeout', 30),
+            max_retries=llm.get('max_retries', 3),
+            models=models_config,
+            features=features_config
+        )
 
         # --- Redis Configuration ---
-        if 'redis' in yaml_data:
-            redis_config = yaml_data['redis']
-            
-            # Support environment variable override for password
-            redis_password = redis_config.get('password')
-            if redis_password is None:
-                redis_password = os.getenv('REDIS_PASSWORD')
-            
-            config.redis = RedisConfig(
-                enabled=redis_config.get('enabled', True),
-                host=redis_config.get('host', 'localhost'),
-                port=redis_config.get('port', 6379),
-                db=redis_config.get('db', 0),
-                password=redis_password,
-                ttl_seconds=redis_config.get('ttl_seconds', 86400),
-                max_connections=redis_config.get('connection_pool', {}).get('max_connections', 50),
-                socket_timeout=redis_config.get('connection_pool', {}).get('socket_timeout', 5),
-                socket_connect_timeout=redis_config.get('connection_pool', {}).get('socket_connect_timeout', 5)
-            )
+        redis_config = yaml_data['redis']
+        
+        # Support environment variable override for password
+        redis_password = redis_config.get('password')
+        if redis_password is None:
+            redis_password = os.getenv('REDIS_PASSWORD')
+        
+        config.redis = RedisConfig(
+            enabled=redis_config.get('enabled', True),
+            host=redis_config.get('host', 'localhost'),
+            port=redis_config.get('port', 6379),
+            db=redis_config.get('db', 0),
+            password=redis_password,
+            ttl_seconds=redis_config.get('ttl_seconds', 86400),
+            max_connections=redis_config.get('connection_pool', {}).get('max_connections', 50),
+            socket_timeout=redis_config.get('connection_pool', {}).get('socket_timeout', 5),
+            socket_connect_timeout=redis_config.get('connection_pool', {}).get('socket_connect_timeout', 5)
+        )
         
         # --- API ---
-        if 'api' in yaml_data:
-            api = yaml_data['api']
-            config.api = APIConfig(
-                host=api.get('host', '0.0.0.0'),
-                port=api.get('port', 8000),
-                reload=api.get('reload', True),
-                title=api.get('title', 'Financial News Intelligence API'),
-                description=api.get('description', 'Multi-agent AI system'),
-                version=api.get('version', '1.0.0')
-            )
-        
-        # --- Resources ---
-        if 'resources' in yaml_data:
-            res = yaml_data['resources']
-            config.resources = ResourcesConfig(
-                company_aliases=res.get('company_aliases', 'company_aliases.json'),
-                sector_tickers=res.get('sector_tickers', 'sector_tickers.json'),
-                regulators=res.get('regulators', 'regulators.json'),
-                regulator_impact=res.get('regulator_impact', 'regulator_sector_impact.json'),
-                supply_chain_graph=res.get('supply_chain_graph', 'supply_chain_graph.json')
-            )
+        api = yaml_data['api']
+        config.api = APIConfig(
+            host=api.get('host', '0.0.0.0'),
+            port=api.get('port', 8000),
+            reload=api.get('reload', True),
+            title=api.get('title', 'Financial News Intelligence API'),
+            description=api.get('description', 'Multi-agent AI system'),
+            version=api.get('version', '1.0.0')
+        )
         
         # --- Logging ---
-        if 'logging' in yaml_data:
-            log = yaml_data['logging']
-            config.logging = LoggingConfig(
-                level=log.get('level', 'INFO'),
-                format=log.get('format', '%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-            )
+        log = yaml_data['logging']
+        config.logging = LoggingConfig(
+            level=log.get('level', 'INFO'),
+            format=log.get('format', '%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+        )
         
         # --- Performance ---
-        if 'performance' in yaml_data:
-            perf = yaml_data['performance']
-            config.performance = PerformanceConfig(
-                cache_embeddings=perf.get('cache_embeddings', True),
-                batch_size=perf.get('batch_size', 32),
-                num_workers=perf.get('num_workers', 4)
-            )
+        perf = yaml_data['performance']
+        config.performance = PerformanceConfig(
+            cache_embeddings=perf.get('cache_embeddings', True),
+            batch_size=perf.get('batch_size', 32),
+            num_workers=perf.get('num_workers', 4)
+        )
         
         # --- Development ---
-        if 'development' in yaml_data:
-            dev = yaml_data['development']
-            config.development = DevelopmentConfig(
-                debug=dev.get('debug', False),
-                use_mock_data=dev.get('use_mock_data', False),
-                mock_data_path=dev.get('mock_data_path', 'mock_news_data.json'),
-                enable_profiling=dev.get('enable_profiling', False)
-            )
+        dev = yaml_data['development']
+        config.development = DevelopmentConfig(
+            debug=dev.get('debug', False),
+            use_mock_data=dev.get('use_mock_data', False),
+            mock_data_path=dev.get('mock_data_path', 'mock_news_data.json'),
+            enable_profiling=dev.get('enable_profiling', False)
+        )
         
         print(f"✓ Configuration loaded from {config_path}")
-        return config
         
     except Exception as e:
         print(f"⚠ Error loading config file: {e}")
         print("  Using default configuration values")
         return Config()
+
+
+
+    # Load Prompts
+    prompts_config = PromptsConfig()
+    try:
+        with open(PROMPTS_FILE, 'r') as f:
+            prompts_data = yaml.safe_load(f) or {}
+        
+        p = prompts_data['entity_extraction']
+        prompts_config.entity_extraction = EntityExtractionPrompts(
+            system_message=p.get('system_message', ''),
+            task_prompt=p.get('task_prompt', ''),
+            entity_context_format=p.get('entity_context_format', '')
+        )
+        
+        p = prompts_data['sentiment_analysis']
+        prompts_config.sentiment_analysis = SentimentAnalysisPrompts(
+            system_message=p.get('system_message', ''),
+            task_prompt=p.get('task_prompt', ''),
+            few_shot_examples=p.get('few_shot_examples', '')
+        )
+
+        p = prompts_data['stock_mapping']
+        prompts_config.stock_mapping = StockMappingPrompts(
+            system_message=p.get('system_message', ''),
+            task_prompt=p.get('task_prompt', '')
+        )
+
+        p = prompts_data['supply_chain']
+        prompts_config.stock_mapping = SupplyChainPrompts(
+            system_message=p.get('system_message', ''),
+            task_prompt=p.get('task_prompt', ''),
+            few_shot_examples=p.get('few_shot_examples', '')
+        )
+
+        p = prompts_data['query_routing']
+        prompts_config.stock_mapping = QueryRoutingPrompts(
+            system_message=p.get('system_message', ''),
+            task_prompt=p.get('task_prompt', ''),
+            few_shot_examples=p.get('few_shot_examples', '')
+        )
+
+
+            
+        print(f"✓ Prompts loaded from {PROMPTS_FILE}")
+    except Exception as e:
+        print(f"⚠ Error loading prompts file: {e}")
+    
+    config.prompts = prompts_config
+    return config
 
 
 # Singleton instance

@@ -1,0 +1,650 @@
+
+# ============================================================================
+# ENTITY EXTRACTION PROMPTS
+# ============================================================================
+entity_extraction:
+  system_message: |
+    You are a financial entity extraction expert specializing in Indian and global markets.
+    Extract companies, sectors, regulators, people, and market events with high precision.
+    Always provide confidence scores and ticker symbols when identifiable.
+    Return results in strict JSON format matching the EntityExtractionSchema.
+
+  task_prompt: |
+    Extract financial entities from this news article with high precision:
+
+    **Title**: {title}
+
+    **Content**: {content}
+
+    **Task**: Extract the following entities:
+
+    1. **Companies**:
+       - Full company name as mentioned
+       - Stock ticker symbol (e.g., HDFCBANK for NSE, RELIANCE for BSE, AAPL for NASDAQ)
+       - Industry sector (e.g., Banking, IT, Auto)
+       - Confidence score (0.0-1.0) - how certain you are this is a company
+
+    2. **Sectors**:
+       - Broad industry categories mentioned or implied
+       - Examples: Banking, IT, Pharma, Auto, Energy, FMCG, Telecom
+
+    3. **Regulators**:
+       - Regulatory bodies or government entities
+       - Include full name, acronym, and jurisdiction
+       - Examples: RBI (India), SEBI (India), US FDA (United States)
+       - Confidence score (0.0-1.0)
+
+    4. **People**:
+       - Key individuals mentioned (CEOs, ministers, analysts)
+       - Full names only (avoid single names)
+
+    5. **Events**:
+       - Market events or corporate actions
+       - Event type (e.g., dividend, merger, rate_hike, earnings, ipo)
+       - Brief description
+       - Confidence score (0.0-1.0)
+
+    **Guidelines**:
+    - Ticker symbols: Use correct exchange format (NSE/BSE for Indian stocks, NYSE/NASDAQ for US)
+    - Sectors: Use standard industry classifications
+    - Confidence: 1.0 = explicit mention, 0.7-0.9 = strong inference, 0.5-0.6 = weak inference
+    - Events: Normalize to lowercase with underscores (e.g., "stock buyback" → "stock_buyback")
+
+    **Output**: Return structured JSON matching the EntityExtractionSchema format.
+
+  entity_context_format: |
+    Companies: [{companies}], Sectors: [{sectors}], Regulators: [{regulators}], Events: [{events}]
+
+# ============================================================================
+# SENTIMENT ANALYSIS PROMPTS
+# ============================================================================
+sentiment_analysis:
+  system_message: |
+    You are an expert financial sentiment analyst specializing in market impact assessment.
+
+    Your task is to analyze financial news articles and determine their sentiment (Bullish, Bearish, or Neutral) along with confidence scores and key factors supporting your analysis.
+
+    **Few-Shot Examples**:
+
+    {few_shot_examples}
+
+    ---
+
+    **Your Analysis Should**:
+    - Provide clear, actionable sentiment classification
+    - Include specific, evidence-based key factors
+    - Assign realistic confidence and signal strength scores
+    - Consider entity context and market implications
+
+    Always return your analysis in the specified structured JSON format.
+
+  few_shot_examples: |
+    **Example 1:**
+    Article: "HDFC Bank announces 15% dividend increase and approves Rs 5,000 crore stock buyback program."
+    Entities: Companies: [HDFC Bank], Events: [dividend, stock buyback]
+    Analysis:
+    - Classification: Bullish
+    - Confidence Score: 92
+    - Key Factors:
+      * Significant dividend increase (15%) signals strong profitability
+      * Stock buyback demonstrates management confidence in valuation
+      * Capital return to shareholders is positive market signal
+    - Signal Strength: 95
+
+    **Example 2:**
+    Article: "TCS announces layoffs affecting 5,000 employees amid cost-cutting measures and declining revenue growth."
+    Entities: Companies: [TCS], Events: [layoffs]
+    Analysis:
+    - Classification: Bearish
+    - Confidence Score: 88
+    - Key Factors:
+      * Large-scale layoffs indicate operational challenges
+      * Cost-cutting suggests margin pressure
+      * Declining revenue growth is negative fundamental signal
+    - Signal Strength: 85
+
+    **Example 3:**
+    Article: "RBI maintains repo rate at 6.5%, citing balanced inflation and growth outlook."
+    Entities: Regulators: [RBI], Events: [policy_decision]
+    Analysis:
+    - Classification: Neutral
+    - Confidence Score: 75
+    - Key Factors:
+      * No change in policy rate maintains status quo
+      * Balanced economic outlook (neither hawkish nor dovish)
+      * Market expectations were already aligned with this decision
+    - Signal Strength: 50
+
+    **Example 4:**
+    Article: "Reliance Industries Q3 profit surges 25% beating analyst estimates, driven by strong retail and telecom performance."
+    Entities: Companies: [Reliance Industries], Events: [earnings]
+    Analysis:
+    - Classification: Bullish
+    - Confidence Score: 90
+    - Key Factors:
+      * Earnings beat analyst consensus (positive surprise)
+      * Strong growth rate (25% YoY) across key segments
+      * Multiple business units performing well (diversification strength)
+    - Signal Strength: 93
+
+    **Example 5:**
+    Article: "Steel prices decline 8% this quarter due to weak demand from construction and auto sectors."
+    Entities: Sectors: [Steel, Construction, Auto], Events: [price_decline]
+    Analysis:
+    - Classification: Bearish
+    - Confidence Score: 82
+    - Key Factors:
+      * Price decline directly impacts steel sector margins
+      * Weak demand from major customers (construction, auto)
+      * Sector-wide headwinds suggest broader economic slowdown
+    - Signal Strength: 78
+
+    **Example 6:**
+    Article: "Asian Paints announces 3% price increase across product portfolio citing higher raw material costs."
+    Entities: Companies: [Asian Paints], Events: [price_increase]
+    Analysis:
+    - Classification: Neutral
+    - Confidence Score: 65
+    - Key Factors:
+      * Price increase can improve margins (positive)
+      * Rising input costs compress profitability (negative)
+      * Impact on demand from price hike is uncertain
+    - Signal Strength: 55
+
+  task_prompt: |
+    Analyze the sentiment of this financial news article and determine its market impact.
+
+    **Article Title**: {title}
+
+    **Article Content**: {content}
+    {entity_context}
+
+    ---
+
+    **Your Task**: Provide a comprehensive sentiment analysis following this structure:
+
+    1. **Classification**: Choose one - Bullish, Bearish, or Neutral
+    2. **Confidence Score**: Rate 0-100 based on signal clarity
+    3. **Key Factors**: List 3-5 specific reasons supporting your classification
+    4. **Signal Strength**: Rate 0-100 for trading signal quality (higher = stronger actionable signal)
+
+    **Guidelines**:
+    - **Bullish**: Positive news (earnings beats, dividends, expansion, strong growth, upgrades)
+    - **Bearish**: Negative news (losses, layoffs, regulatory issues, downgrades, missed targets)
+    - **Neutral**: Mixed signals, status quo, or unclear impact
+
+    - **Confidence Score**: Based on clarity and magnitude of impact
+      - 90-100: Crystal clear sentiment with strong evidence
+      - 70-90: Clear sentiment with good supporting factors
+      - 50-70: Moderate clarity with some ambiguity
+      - Below 50: Unclear or highly mixed signals
+
+    - **Signal Strength**: Actionable trading signal quality
+      - Consider: Entity importance, event magnitude, market relevance
+      - Direct company news (earnings, dividends) = higher signal
+      - Sector-wide or regulatory news = moderate signal
+      - Indirect effects or minor news = lower signal
+
+    **Important**: 
+    - Focus on **factual analysis**, not speculation
+    - Consider **entity context** when evaluating impact
+    - Be **conservative** with confidence scores for ambiguous news
+    - Distinguish between **sentiment direction** (classification) and **signal quality** (strength)
+
+    Now analyze the article above and provide your structured assessment.
+
+# ============================================================================
+# STOCK IMPACT MAPPING PROMPTS
+# ============================================================================
+stock_impact:
+  system_message: |
+    You are an expert stock market analyst specializing in impact assessment.
+    Your task is to identify which stocks will be affected by financial news based on:
+    - Direct company mentions
+    - Sector-wide implications
+    - Regulatory/policy changes
+    - Supply chain relationships
+
+    Always provide clear reasoning and conservative confidence scores.
+    Return results in strict JSON format matching the StockImpactSchema.
+
+  task_prompt: |
+    Analyze this financial news article and identify which stock symbols will be impacted.
+
+    **Article Title**: {title}
+
+    **Article Content**: {content}
+
+    **Extracted Entities**:
+
+    **Companies**:
+    {companies}
+
+    **Sectors**: {sectors}
+
+    **Regulators**:
+    {regulators}
+
+    **Events**:
+    {events}
+
+    ---
+
+    **Task**: Identify stock symbols that will be impacted by this news. For each stock:
+
+    1. **Provide the exact stock ticker symbol** (e.g., HDFCBANK for NSE, RELIANCE for BSE, AAPL for NASDAQ)
+    2. **Provide the full company name** for clarity
+    3. **Assign a confidence score (0.0-1.0)** based on:
+       - **Direct mention (0.90-1.00)**: Company explicitly named and central to the story
+       - **Sector-wide impact (0.60-0.80)**: Company operates in mentioned sector and will be affected
+       - **Regulatory/Indirect (0.40-0.60)**: Company affected through regulatory changes or supply chain
+    4. **Classify impact type**:
+       - **direct**: Company explicitly mentioned in article
+       - **sector**: Company in affected sector but not directly mentioned
+       - **regulatory**: Impacted by regulatory changes mentioned in article
+    5. **Provide clear reasoning** explaining why this stock is impacted
+
+    **Guidelines**:
+    - Focus on **publicly traded companies** with valid stock ticker symbols
+    - Use correct exchange formats (NSE/BSE for Indian stocks, NYSE/NASDAQ for US stocks)
+    - For Indian stocks, use common ticker formats (e.g., HDFCBANK, TCS, RELIANCE, INFY)
+    - Prioritize **direct and sector-wide impacts** over distant connections
+    - Be conservative with confidence scores - only assign 0.9+ for explicit mentions
+    - Limit results to top {max_stocks} most impacted stocks
+    - If a company is mentioned but ticker is uncertain, still include it with reasoning
+    - Consider upstream/downstream supply chain effects for sector analysis
+
+    **Important**: If no companies are mentioned or impacted, return an empty list with explanation in overall_market_impact.
+
+    **Output Format**: Return structured JSON matching the StockImpactSchema format.
+
+# ============================================================================
+# SUPPLY CHAIN ANALYSIS PROMPTS
+# ============================================================================
+supply_chain:
+  system_message: |
+    You are an expert supply chain economist specializing in cross-sectoral impact analysis.
+
+    Your task is to analyze financial news and predict how it affects upstream suppliers and downstream customers through supply chain relationships.
+
+    **Few-Shot Examples**:
+
+    {few_shot_examples}
+
+    ---
+
+    **Your Analysis Should**:
+    - Use economic reasoning to infer supply chain dependencies
+    - Assign realistic dependency weights based on sector relationships
+    - Calculate impact scores using: dependency_weight × sentiment_signal_strength
+    - Provide clear, evidence-based reasoning for each impact
+    - Consider time horizons for impact realization
+    - Only include impacts above the minimum threshold ({min_impact_score})
+
+    Always return your analysis in the specified structured JSON format matching SupplyChainImpactSchema.
+
+  few_shot_examples: |
+    **Example 1: Auto Sector Sales Surge**
+    Article: "Auto sector sales jump 20% in festive season driven by strong consumer demand"
+    Sectors: [Auto]
+    Sentiment: Bullish (Signal Strength: 85)
+
+    Analysis:
+    Upstream Impacts (Demand Shocks):
+    1. Steel Sector
+       - Impact Score: 76.5
+       - Dependency Weight: 0.85
+       - Reasoning: Increased auto production creates higher demand for steel components (body panels, frames). Auto sector has strong dependency on steel suppliers. Positive sales translate to increased orders for upstream steel manufacturers.
+       - Time Horizon: Short-term (1-3 months)
+
+    2. Semiconductors Sector
+       - Impact Score: 67.5
+       - Dependency Weight: 0.75
+       - Reasoning: Modern vehicles require chips for infotainment, safety systems, and powertrains. Sales surge drives chip demand. Auto-semiconductor supply chain is critical with moderate-high dependency.
+       - Time Horizon: Medium-term (3-6 months)
+
+    3. Rubber Sector
+       - Impact Score: 58.5
+       - Dependency Weight: 0.65
+       - Reasoning: Tire manufacturers (rubber sector) benefit from increased vehicle production. Auto sector depends on rubber for tires and seals. Positive demand signal propagates upstream.
+       - Time Horizon: Short-term (1-2 months)
+
+    Downstream Impacts (Supply Effects):
+    1. Logistics Sector
+       - Impact Score: 54.0
+       - Dependency Weight: 0.60
+       - Reasoning: Higher auto sales increase vehicle availability for logistics fleets. Transportation companies benefit from expanded supply. Moderate dependency on auto sector for fleet expansion.
+       - Time Horizon: Medium-term (3-6 months)
+
+    2. Insurance Sector
+       - Impact Score: 40.5
+       - Dependency Weight: 0.45
+       - Reasoning: More vehicles on road means increased insurance policy demand. Insurance sector benefits from auto market growth through new policy sales.
+       - Time Horizon: Long-term (6-12 months)
+
+    ---
+
+    **Example 2: Steel Price Hike**
+    Article: "Steel prices increase 15% due to rising raw material costs and supply constraints"
+    Sectors: [Steel]
+    Sentiment: Bearish (Signal Strength: 78)
+
+    Analysis:
+    Upstream Impacts (Demand Shocks):
+    1. Mining Sector
+       - Impact Score: 63.0
+       - Dependency Weight: 0.90
+       - Reasoning: Steel mills are major iron ore consumers. Price hikes may reduce steel production, lowering mining demand. Strong dependency creates direct upstream impact.
+       - Time Horizon: Short-term (1-2 months)
+
+    2. Coal Sector
+       - Impact Score: 52.5
+       - Dependency Weight: 0.75
+       - Reasoning: Steel production uses coking coal. Price pressures may reduce steel output, affecting coal demand. Moderate-high dependency on coal suppliers.
+       - Time Horizon: Short-term (2-3 months)
+
+    Downstream Impacts (Supply Effects):
+    1. Auto Sector
+       - Impact Score: 68.0
+       - Dependency Weight: 0.85
+       - Reasoning: Higher steel costs increase auto manufacturing expenses, compressing margins. Auto sector highly dependent on steel supplies. Price increases create cost pressure downstream.
+       - Time Horizon: Short-term (1-3 months)
+
+    2. Construction Sector
+       - Impact Score: 64.0
+       - Dependency Weight: 0.80
+       - Reasoning: Steel is critical for infrastructure and building projects. Price hikes increase construction costs, potentially delaying projects. Strong downstream dependency.
+       - Time Horizon: Medium-term (3-6 months)
+
+    3. Infrastructure Sector
+       - Impact Score: 60.0
+       - Dependency Weight: 0.75
+       - Reasoning: Infrastructure projects require large steel quantities. Price increases affect project economics and timelines. Moderate-high dependency creates supply cost impact.
+       - Time Horizon: Medium-term (3-9 months)
+
+    ---
+
+    **Example 3: RBI Rate Hike**
+    Article: "RBI raises repo rate by 25 basis points to control inflation"
+    Sectors: [Banking, Finance]
+    Sentiment: Neutral (Signal Strength: 50)
+
+    Analysis:
+    Upstream Impacts (Demand Shocks):
+    1. IT Sector
+       - Impact Score: 35.0
+       - Dependency Weight: 0.70
+       - Reasoning: Banks depend on IT services for digital infrastructure. Rate hikes may constrain banking budgets, reducing IT spending. Moderate dependency creates upstream demand pressure.
+       - Time Horizon: Medium-term (6-12 months)
+
+    Downstream Impacts (Supply Effects):
+    1. Real Estate Sector
+       - Impact Score: 72.0
+       - Dependency Weight: 0.90
+       - Reasoning: Higher interest rates increase mortgage costs, reducing real estate demand. Real estate heavily dependent on banking credit availability. Rate hikes directly impact affordability.
+       - Time Horizon: Medium-term (3-6 months)
+
+    2. Auto Sector
+       - Impact Score: 56.0
+       - Dependency Weight: 0.70
+       - Reasoning: Auto loans become more expensive with rate hikes, dampening vehicle sales. Auto sector relies on consumer financing. Higher rates reduce purchase affordability.
+       - Time Horizon: Short-term (1-3 months)
+
+    3. Consumer Durables Sector
+       - Impact Score: 45.0
+       - Dependency Weight: 0.60
+       - Reasoning: EMI financing for appliances and electronics becomes costlier. Consumer durables depend on credit-driven demand. Rate increases reduce purchase capacity.
+       - Time Horizon: Short-term (1-3 months)
+
+  task_prompt: |
+    Analyze the supply chain impacts of this financial news across sectors.
+
+    **Article Title**: {title}
+
+    **Article Content**: {content}
+
+    **Extracted Entities**:
+    {entity_context}
+
+    **Sentiment Analysis**:
+    {sentiment_context}
+
+    ---
+
+    **Your Task**: Identify cross-sectoral supply chain impacts using economic reasoning.
+
+    **Analysis Framework**:
+
+    1. **Upstream Impacts (Demand Shocks)**:
+       - Identify suppliers/dependencies of the affected sector(s)
+       - Assess how news creates demand changes for upstream sectors
+       - Consider: How does sentiment direction affect supplier demand?
+       - Example: Auto sales ↑ → Steel demand ↑ (upstream supplier benefits)
+
+    2. **Downstream Impacts (Supply Effects)**:
+       - Identify customers/consumers of the affected sector(s)
+       - Assess how news creates supply changes for downstream sectors
+       - Consider: How does sentiment direction affect customer costs/availability?
+       - Example: Steel prices ↑ → Auto costs ↑ (downstream customer pressured)
+
+    **For Each Impacted Sector, Provide**:
+    - **Target Sector**: Name of the impacted sector
+    - **Relationship Type**: upstream_demand_shock OR downstream_supply_impact
+    - **Impact Score** (0-100): Magnitude of impact based on:
+      - Dependency strength between sectors (0.0-1.0 weight)
+      - Sentiment signal strength ({signal_strength}/100)
+      - Formula: dependency_weight × signal_strength = impact_score
+    - **Dependency Weight** (0.0-1.0): How strongly sectors are connected
+      - 0.9-1.0: Critical dependency (e.g., Auto→Steel, Real Estate→Banking)
+      - 0.7-0.8: Strong dependency (e.g., IT→Telecom, Pharma→Chemicals)
+      - 0.5-0.6: Moderate dependency (e.g., Auto→Logistics, Banking→IT)
+      - Below 0.5: Weak/indirect dependency
+    - **Reasoning**: Clear explanation of the supply chain mechanism and impact direction
+    - **Time Horizon**: Expected timeframe (short-term: 1-3 months, medium-term: 3-6 months, long-term: 6-12 months)
+    - **Impacted Stocks**: List of major stock symbols in the target sector (if applicable)
+
+    **Guidelines**:
+    - Only include impacts with **impact_score >= {min_impact_score}**
+    - Be **conservative** with dependency weights - require clear economic linkage
+    - Consider **sentiment direction**:
+      - Bullish: Demand shocks positive for suppliers, supply effects may benefit/pressure customers
+      - Bearish: Demand shocks negative for suppliers, supply constraints for customers
+      - Neutral: Minimal propagation effects
+    - Focus on **direct supply chain relationships** (1-2 degrees of separation)
+    - Limit analysis to **top 8 most significant impacts** (4 upstream + 4 downstream max)
+    - For **regulator/policy news**, focus on regulated sectors and their dependencies
+
+    **Important**: If the news has minimal supply chain implications (e.g., single company dividend), return empty upstream/downstream lists with appropriate reasoning.
+
+    Now analyze the supply chain impacts above.
+
+# ============================================================================
+# QUERY ROUTING PROMPTS
+# ============================================================================
+query_routing:
+  system_message: |
+    You are an expert query analyzer for financial news search.
+    Your task is to analyze user queries and determine the optimal search strategy.
+
+    You must extract ALL entities mentioned in the query, even if they are:
+    - Unfamiliar companies or startups
+    - Foreign companies
+    - New market entrants
+    - Any organization relevant to financial news
+
+    Do NOT limit extraction to a predefined list - use your knowledge to identify all relevant entities.
+
+    **Few-Shot Examples**:
+
+    {few_shot_examples}
+
+    ---
+
+    Always return results in strict JSON format matching the QueryRouterSchema.
+    Choose the MOST APPROPRIATE strategy based on query content and structure.
+    Extract ALL relevant entities with high precision, including unknown/new companies.
+
+  few_shot_examples: |
+    **Example 1: Direct Entity Query**
+    Query: "HDFC Bank dividend news"
+    Analysis:
+    - Strategy: DIRECT_ENTITY
+    - Reasoning: Query explicitly mentions company name "HDFC Bank" and event "dividend"
+    - Entities: ["HDFC Bank"]
+    - Stock Symbols: ["HDFCBANK"]
+    - Sectors: ["Banking"]
+    - Refined Query: "HDFC Bank dividend announcement payout"
+    - Confidence: 0.95
+
+    **Example 2: Sector-Wide Query**
+    Query: "Banking sector outlook"
+    Analysis:
+    - Strategy: SECTOR_WIDE
+    - Reasoning: Query asks about entire "Banking sector" without specific company
+    - Entities: []
+    - Stock Symbols: []
+    - Sectors: ["Banking"]
+    - Refined Query: "Banking sector performance outlook trends"
+    - Confidence: 0.90
+
+    **Example 3: Regulatory Query**
+    Query: "RBI rate hike impact"
+    Analysis:
+    - Strategy: REGULATORY
+    - Reasoning: Query mentions regulator "RBI" and policy action "rate hike"
+    - Entities: []
+    - Stock Symbols: []
+    - Sectors: []
+    - Regulators: ["RBI"]
+    - Refined Query: "RBI repo rate increase monetary policy impact"
+    - Confidence: 0.92
+
+    **Example 4: Sentiment-Driven Query**
+    Query: "Bullish tech stocks"
+    Analysis:
+    - Strategy: SENTIMENT_DRIVEN
+    - Reasoning: Query explicitly asks for "Bullish" sentiment in "tech" sector
+    - Entities: []
+    - Stock Symbols: []
+    - Sectors: ["IT"]
+    - Sentiment Filter: "Bullish"
+    - Refined Query: "positive technology sector stocks growth"
+    - Confidence: 0.88
+
+    **Example 5: Cross-Impact Query**
+    Query: "Steel price increase effect on auto sector"
+    Analysis:
+    - Strategy: CROSS_IMPACT
+    - Reasoning: Query asks about supply chain relationship between "Steel" and "Auto"
+    - Entities: []
+    - Stock Symbols: []
+    - Sectors: ["Steel", "Auto"]
+    - Refined Query: "steel price impact automobile manufacturing costs"
+    - Confidence: 0.85
+
+    **Example 6: Temporal Query**
+    Query: "Recent Reliance earnings"
+    Analysis:
+    - Strategy: TEMPORAL
+    - Reasoning: Query uses temporal keyword "Recent" with company "Reliance" and event "earnings"
+    - Entities: ["Reliance Industries"]
+    - Stock Symbols: ["RELIANCE"]
+    - Sectors: ["Energy"]
+    - Temporal Scope: "recent"
+    - Refined Query: "Reliance Industries latest quarterly earnings results"
+    - Confidence: 0.93
+
+    **Example 7: Semantic Search (Fallback)**
+    Query: "market trends in emerging technologies"
+    Analysis:
+    - Strategy: SEMANTIC_SEARCH
+    - Reasoning: Broad, thematic query without specific entities or sectors
+    - Entities: []
+    - Stock Symbols: []
+    - Sectors: []
+    - Refined Query: "emerging technology market trends investment opportunities"
+    - Confidence: 0.70
+
+    **Example 8: Multiple Companies**
+    Query: "Compare TCS and Infosys Q3 results"
+    Analysis:
+    - Strategy: DIRECT_ENTITY
+    - Reasoning: Query mentions two specific companies "TCS" and "Infosys"
+    - Entities: ["TCS", "Infosys"]
+    - Stock Symbols: ["TCS", "INFY"]
+    - Sectors: ["IT"]
+    - Refined Query: "TCS Infosys quarterly results comparison Q3"
+    - Confidence: 0.94
+
+    **Example 9: Unknown Company**
+    Query: "What's happening with Zomato IPO"
+    Analysis:
+    - Strategy: DIRECT_ENTITY
+    - Reasoning: Query mentions specific company "Zomato" even if not in reference data
+    - Entities: ["Zomato"]
+    - Stock Symbols: ["ZOMATO"]
+    - Sectors: ["E-commerce"]
+    - Refined Query: "Zomato IPO listing initial public offering"
+    - Confidence: 0.92
+
+  task_prompt: |
+    Analyze this user query and determine the optimal search strategy.
+
+    **User Query**: "{query}"
+
+    **Available Strategies**:
+    1. **DIRECT_ENTITY**: User mentions specific company/companies by name
+       - Use when: Company explicitly named (e.g., "HDFC Bank results", "TCS dividend")
+       - Extract: Company names, stock symbols, sectors
+
+    2. **SECTOR_WIDE**: User asks about an entire industry sector
+       - Use when: Sector mentioned without specific companies (e.g., "Banking sector news")
+       - Extract: Sector names
+
+    3. **REGULATORY**: User asks about regulatory bodies or policy changes
+       - Use when: Regulator mentioned (RBI, SEBI, etc.) or policy focus
+       - Extract: Regulator names, affected sectors
+
+    4. **SENTIMENT_DRIVEN**: User filters by sentiment (Bullish/Bearish/Neutral)
+       - Use when: Sentiment keyword present (e.g., "Bullish IT stocks")
+       - Extract: Sentiment filter, relevant sectors
+
+    5. **CROSS_IMPACT**: User asks about supply chain or cross-sectoral effects
+       - Use when: Multiple sectors mentioned with causal relationship
+       - Extract: Source and target sectors
+
+    6. **TEMPORAL**: User emphasizes time-based filtering
+       - Use when: Temporal keywords present (recent, latest, today, last week)
+       - Extract: Entities, temporal scope
+
+    7. **SEMANTIC_SEARCH**: Broad/thematic query without clear structure
+       - Use when: None of above strategies fit clearly
+       - Extract: Refined search query
+
+    **Your Task**:
+    1. Choose the MOST APPROPRIATE strategy (only one)
+    2. Extract ALL relevant entities from the query:
+       - **Companies**: Any company/organization mentioned (even if not well-known)
+       - **Stock Symbols**: Ticker symbols in NSE/BSE format (e.g., HDFCBANK, TCS, RELIANCE)
+       - **Sectors**: Industry sectors (Banking, IT, Auto, Pharma, etc.)
+       - **Regulators**: Regulatory bodies (RBI, SEBI, US FDA, etc.)
+    3. Identify sentiment filter if mentioned (Bullish/Bearish/Neutral)
+    4. Identify temporal scope if mentioned (recent/last_week/last_month)
+    5. Generate a refined query optimized for semantic search
+    6. Assign confidence score (0.0-1.0) based on clarity
+
+    **Important Guidelines**:
+    - **Extract ANY company mentioned**, even if unfamiliar (e.g., startups, foreign companies)
+    - **Infer ticker symbols** based on company names (use common patterns)
+    - **Identify sectors** even if not explicitly mentioned (e.g., "TCS" → IT sector)
+    - Prioritize DIRECT_ENTITY if ANY company name appears
+    - Confidence: 0.9+ for clear queries, 0.7-0.9 for moderate, 0.5-0.7 for ambiguous
+    - Refined query: Expand with synonyms and related terms for better retrieval
+
+    **Entity Extraction Rules**:
+    - Company names: Full names as mentioned (e.g., "HDFC Bank", "Reliance Industries")
+    - Stock symbols: Use NSE format, infer from company name if possible
+    - Sectors: Standard industry classifications (Banking, IT, Auto, Energy, etc.)
+    - Regulators: Include acronym and full name if possible
+
+    Now analyze the user query and return structured routing decision with ALL extracted entities.

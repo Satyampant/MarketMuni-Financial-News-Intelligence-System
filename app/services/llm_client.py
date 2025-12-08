@@ -1,6 +1,5 @@
 """
-LLM Client Service for MarketMuni
-Provides Groq API integration with structured output support using LangChain.
+LLM Client Service for MarketMuni - Groq API integration via LangChain.
 """
 
 import os
@@ -21,15 +20,11 @@ except ImportError:
 
 
 class LLMServiceError(Exception):
-    """Custom exception for LLM service failures."""
     pass
 
 
 class GroqLLMClient:
-    """
-    LLM client for Groq API with structured output support.
-    Uses LangChain for API calls and Pydantic for schema validation.
-    """
+    """Groq API client wrapper using LangChain with structured output support."""
     
     def __init__(
         self,
@@ -40,27 +35,12 @@ class GroqLLMClient:
         timeout: int = 30,
         max_retries: int = 3
     ):
-        """
-        Initialize Groq LLM client.
-        
-        Args:
-            api_key: Groq API key (defaults to GROQ_API_KEY env var)
-            model: Model name (default: llama-3.3-70b-versatile)
-            temperature: Sampling temperature (0.0-1.0)
-            max_tokens: Maximum tokens in response
-            timeout: Request timeout in seconds
-            max_retries: Number of retry attempts on failure
-        """
         if not LANGCHAIN_AVAILABLE:
-            raise ImportError(
-                "langchain-groq is required. Install with: pip install langchain-groq"
-            )
+            raise ImportError("langchain-groq is required.")
         
         self.api_key = api_key or os.getenv("GROQ_API_KEY")
         if not self.api_key:
-            raise ValueError(
-                "GROQ_API_KEY not found. Set via environment variable or pass to constructor."
-            )
+            raise ValueError("GROQ_API_KEY not found.")
         
         self.model = model
         self.temperature = temperature
@@ -68,7 +48,6 @@ class GroqLLMClient:
         self.timeout = timeout
         self.max_retries = max_retries
         
-        # Initialize LangChain ChatGroq
         self.llm = ChatGroq(
             api_key=self.api_key,
             model=model,
@@ -80,19 +59,7 @@ class GroqLLMClient:
         print(f"✓ GroqLLMClient initialized with model: {model}")
     
     def _retry_with_backoff(self, func, *args, **kwargs):
-        """
-        Execute function with exponential backoff retry logic.
-        
-        Args:
-            func: Function to execute
-            *args, **kwargs: Arguments to pass to function
-            
-        Returns:
-            Function result
-            
-        Raises:
-            LLMServiceError: If all retries fail
-        """
+        """Executes function with exponential backoff retry logic."""
         for attempt in range(1, self.max_retries + 1):
             try:
                 return func(*args, **kwargs)
@@ -102,13 +69,13 @@ class GroqLLMClient:
                     print(f"✗ {error_msg}")
                     raise LLMServiceError(error_msg)
                 
-                # Check for rate limit errors
+                # Handle rate limits (429) specifically with longer wait
                 error_str = str(e).lower()
                 if "rate limit" in error_str or "429" in error_str:
-                    wait_time = (2 ** attempt) * 2  # 4s, 8s, 16s
+                    wait_time = (2 ** attempt) * 2
                     print(f"⚠ Rate limit hit. Retrying in {wait_time}s... (attempt {attempt}/{self.max_retries})")
                 else:
-                    wait_time = 2 ** attempt  # 2s, 4s, 8s
+                    wait_time = 2 ** attempt
                     print(f"⚠ Request failed: {e}. Retrying in {wait_time}s... (attempt {attempt}/{self.max_retries})")
                 
                 time.sleep(wait_time)
@@ -119,9 +86,10 @@ class GroqLLMClient:
         schema: Type[BaseModel],
         system_message: Optional[str] = None
     ) -> Dict[str, Any]:
+        """Generates response matching a Pydantic schema."""
         
         def _generate():
-            # This handles schema conversion automatically.
+            # Automatically handles schema conversion/tool calling
             structured_llm = self.llm.with_structured_output(schema)
             
             messages = []
@@ -138,7 +106,6 @@ class GroqLLMClient:
                 return result.model_dump()
             return result
         except Exception as e:
-            # Fallback logic could go here
             raise LLMServiceError(f"Structured generation failed: {e}")
     
     def generate_text(
@@ -146,19 +113,7 @@ class GroqLLMClient:
         prompt: str,
         system_message: Optional[str] = None
     ) -> str:
-        """
-        Generate unstructured text response.
-        
-        Args:
-            prompt: User prompt/query
-            system_message: Optional system message for context
-            
-        Returns:
-            Generated text string
-            
-        Raises:
-            LLMServiceError: If generation fails
-        """
+        """Generates standard unstructured text response."""
         def _generate():
             messages = []
             if system_message:
@@ -175,21 +130,8 @@ class GroqLLMClient:
         prompt: str,
         system_message: Optional[str] = None
     ) -> Dict[str, Any]:
-        """
-        Generate JSON output using JSON mode (fallback method).
-        
-        Args:
-            prompt: User prompt/query (should request JSON format)
-            system_message: Optional system message
-            
-        Returns:
-            Parsed JSON dict
-            
-        Raises:
-            LLMServiceError: If generation or JSON parsing fails
-        """
+        """Fallback generation using JSON mode instead of tool binding."""
         def _generate():
-            # Use model with JSON mode
             json_llm = self.llm.bind(model_kwargs={"response_format": {"type": "json_object"}})
             
             messages = []
@@ -199,7 +141,6 @@ class GroqLLMClient:
             
             response = json_llm.invoke(messages)
             
-            # Parse JSON from response
             try:
                 return json.loads(response.content)
             except json.JSONDecodeError as e:
@@ -208,12 +149,7 @@ class GroqLLMClient:
         return self._retry_with_backoff(_generate)
     
     def validate_connection(self) -> bool:
-        """
-        Test API connection with simple prompt.
-        
-        Returns:
-            True if connection successful, False otherwise
-        """
+        """Simple connectivity test."""
         try:
             response = self.generate_text(
                 prompt="Respond with 'OK' if you can read this.",
@@ -225,12 +161,6 @@ class GroqLLMClient:
             return False
     
     def get_model_info(self) -> Dict[str, Any]:
-        """
-        Get current model configuration.
-        
-        Returns:
-            Dict with model settings
-        """
         return {
             "provider": "groq",
             "model": self.model,

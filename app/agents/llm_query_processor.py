@@ -1,9 +1,3 @@
-"""
-LLM Query Processor - Strategy Executor with Metadata Filtering
-UPDATED: Added process_query_with_routing to eliminate double LLM calls
-File: app/agents/llm_query_processor.py
-"""
-
 from typing import List, Dict, Any, Optional, Tuple
 import json
 
@@ -16,8 +10,7 @@ from app.core.config_loader import get_config
 
 class LLMQueryProcessor:
     """
-    Strategy-based query processor using LLM routing decisions.
-    Executes ChromaDB metadata filtering based on extracted entities.
+    Strategy-based query processor using LLM routing decisions and ChromaDB metadata filtering.
     """
     
     def __init__(
@@ -26,14 +19,6 @@ class LLMQueryProcessor:
         query_router: LLMQueryRouter,
         config: Optional[Any] = None
     ):
-        """
-        Initialize LLM query processor.
-        
-        Args:
-            vector_store: ChromaDB vector store instance
-            query_router: LLM query router for strategy selection
-            config: Optional configuration override
-        """
         self.vector_store = vector_store
         self.query_router = query_router
         self.config = config or get_config()
@@ -46,13 +31,10 @@ class LLMQueryProcessor:
         routing: QueryRouterSchema,
         top_k: int
     ) -> List[Dict[str, Any]]:
-        """
-        Execute direct entity search using stock symbol filtering.
-        Uses metadata filter: where={"impacted_stocks": {"$contains": "HDFCBANK"}}
-        """
+        """Executes search prioritized by stock symbols, falling back to company names."""
         results = []
         
-        # Search by stock symbols (highest precision)
+        # Priority 1: Search by stock symbols
         for symbol in routing.stock_symbols:
             where_filter = {
                 "$or": [
@@ -68,7 +50,7 @@ class LLMQueryProcessor:
             )
             results.extend(symbol_results)
         
-        # Search by company names if no symbols or insufficient results
+        # Priority 2: Search by company names if results are insufficient
         if len(results) < top_k and routing.entities:
             for company in routing.entities:
                 where_filter = {
@@ -98,10 +80,7 @@ class LLMQueryProcessor:
         routing: QueryRouterSchema,
         top_k: int
     ) -> List[Dict[str, Any]]:
-        """
-        Execute sector-wide search using sector metadata filtering.
-        Uses metadata filter: where={"entities": {"$contains": "Banking"}}
-        """
+        """Executes search filtered by sector metadata."""
         results = []
         
         for sector in routing.sectors:
@@ -132,10 +111,7 @@ class LLMQueryProcessor:
         routing: QueryRouterSchema,
         top_k: int
     ) -> List[Dict[str, Any]]:
-        """
-        Execute regulatory search using regulator metadata filtering.
-        Uses metadata filter: where={"entities": {"$contains": "RBI"}}
-        """
+        """Executes search filtered by regulator entities (e.g., RBI, SEBI)."""
         results = []
         
         for regulator in routing.regulators:
@@ -166,10 +142,7 @@ class LLMQueryProcessor:
         routing: QueryRouterSchema,
         top_k: int
     ) -> List[Dict[str, Any]]:
-        """
-        Execute sentiment-driven search with sentiment and sector filtering.
-        Uses metadata filter: where={"sentiment_classification": "Bullish", "entities": {"$contains": "Tech"}}
-        """
+        """Executes search based on sentiment classification, optionally combined with sectors."""
         if not routing.sentiment_filter:
             return self._execute_semantic_strategy(routing, top_k)
         
@@ -220,10 +193,7 @@ class LLMQueryProcessor:
         routing: QueryRouterSchema,
         top_k: int
     ) -> List[Dict[str, Any]]:
-        """
-        Execute pure semantic search without metadata filters.
-        Uses routing.refined_query for vector similarity search.
-        """
+        """Standard semantic search using the refined query."""
         results = self.vector_store.search(
             query=routing.refined_query,
             top_k=top_k,
@@ -237,10 +207,7 @@ class LLMQueryProcessor:
         routing: QueryRouterSchema,
         top_k: int
     ) -> List[Dict[str, Any]]:
-        """
-        Execute cross-impact search for supply chain relationships.
-        Searches for articles mentioning multiple sectors.
-        """
+        """Executes search for multi-sector relationships, boosting articles with cross-impact data."""
         if len(routing.sectors) < 2:
             return self._execute_sector_wide_strategy(routing, top_k)
         
@@ -258,14 +225,14 @@ class LLMQueryProcessor:
             )
             results.extend(sector_results)
         
-        # Deduplicate and prioritize articles with cross_impacts
+        # Deduplicate and boost
         seen_ids = set()
         unique_results = []
         for result in results:
             article_id = result["article_id"]
             if article_id not in seen_ids:
                 seen_ids.add(article_id)
-                # Boost articles with cross-impact data
+                # Boost logic: 1.2x multiplier for cross-impact data
                 if result["metadata"].get("has_cross_impacts", False):
                     result["cross_impact_boost"] = 1.2
                 unique_results.append(result)
@@ -277,10 +244,7 @@ class LLMQueryProcessor:
         routing: QueryRouterSchema,
         top_k: int
     ) -> List[Dict[str, Any]]:
-        """
-        Execute temporal search with time-based filtering.
-        Falls back to entity search with temporal query refinement.
-        """
+        """Falls back to entity search with temporal query refinement if entities exist."""
         if routing.entities or routing.stock_symbols:
             return self._execute_direct_entity_strategy(routing, top_k)
         else:
@@ -291,9 +255,7 @@ class LLMQueryProcessor:
         routing: QueryRouterSchema,
         top_k: int
     ) -> List[Dict[str, Any]]:
-        """
-        Dispatch to appropriate strategy executor based on routing.strategy.
-        """
+        """Dispatches execution to the appropriate strategy method."""
         strategy_map = {
             QueryIntent.DIRECT_ENTITY: self._execute_direct_entity_strategy,
             QueryIntent.SECTOR_WIDE: self._execute_sector_wide_strategy,
@@ -317,12 +279,8 @@ class LLMQueryProcessor:
         primary_results: List[Dict[str, Any]],
         context_results: List[Dict[str, Any]]
     ) -> List[Dict[str, Any]]:
-        """
-        Merge and deduplicate results from multiple strategies.
-        Keeps highest similarity score per article_id.
-        """
+        """Merges results, keeping the highest similarity score per article ID."""
         merged = {}
-        
         all_results = primary_results + context_results
         
         for result in all_results:
@@ -343,12 +301,11 @@ class LLMQueryProcessor:
         result: Dict[str, Any],
         routing: QueryRouterSchema
     ) -> float:
-        """
-        Calculate strategy match score based on metadata alignment.
-        """
+        """Calculates a score (0.0 - 1.0) based on how well the article metadata matches the intent."""
         metadata = result["metadata"]
-        entities = metadata.get("entities", {})
         
+        # Safely parse JSON fields
+        entities = metadata.get("entities", {})
         if isinstance(entities, str):
             try:
                 entities = json.loads(entities)
@@ -389,7 +346,6 @@ class LLMQueryProcessor:
                 sector.lower() in [s.lower() for s in article_sectors]
                 for sector in routing.sectors
             )
-            
             if sector_match:
                 strategy_score = 0.8
         
@@ -399,7 +355,6 @@ class LLMQueryProcessor:
                 regulator.lower() in [r.lower() for r in article_regulators]
                 for regulator in routing.regulators
             )
-            
             if regulator_match:
                 strategy_score = 1.0
         
@@ -410,7 +365,7 @@ class LLMQueryProcessor:
             
             if sentiment_match:
                 strategy_score = 0.7
-                
+                # Boost if sector also matches
                 article_sectors = entities.get("Sectors", [])
                 sector_match = any(
                     sector.lower() in [s.lower() for s in article_sectors]
@@ -436,9 +391,8 @@ class LLMQueryProcessor:
         sentiment_signal: float
     ) -> float:
         """
-        Amplify scores for high-signal articles.
-        Formula: sentiment_boost = 1.0 + (signal_strength / 200.0)
-        Max boost: 1.5x (when signal_strength = 100)
+        Amplifies score based on signal strength. 
+        Formula: 1.0 + (signal_strength / 200.0). Max boost ~1.5x.
         """
         sentiment_boost = 1.0 + (sentiment_signal / 200.0)
         return score * sentiment_boost
@@ -448,20 +402,20 @@ class LLMQueryProcessor:
         results: List[Dict[str, Any]],
         routing: QueryRouterSchema
     ) -> List[Dict[str, Any]]:
-        """
-        Rerank results by combining semantic similarity, strategy match, and sentiment signal.
-        """
+        """Reranks results combining semantic similarity, strategy match, and sentiment signal."""
         for result in results:
             semantic_score = result.get("similarity", 0.0)
-            
             strategy_score = self._calculate_strategy_score(result, routing)
             
+            # Weighted base score: 50% semantic, 50% strategy
             base_score = (semantic_score * 0.5) + (strategy_score * 0.5)
             
             metadata = result["metadata"]
             signal_strength = float(metadata.get("sentiment_signal_strength", 0.0))
+            
             final_score = self._apply_sentiment_boost(base_score, signal_strength)
             
+            # Apply Cross-Impact Boost if present
             cross_impact_boost = result.get("cross_impact_boost", 1.0)
             final_score *= cross_impact_boost
             
@@ -475,14 +429,13 @@ class LLMQueryProcessor:
         self,
         results: List[Dict[str, Any]]
     ) -> List[NewsArticle]:
-        """
-        Convert search results to NewsArticle objects with parsed metadata.
-        """
+        """Converts raw ChromaDB results to NewsArticle objects with parsed metadata."""
         articles = []
         
         for result in results:
             metadata = result["metadata"]
             
+            # Metadata Parsing
             entities = metadata.get("entities", {})
             if isinstance(entities, str):
                 try:
@@ -539,42 +492,30 @@ class LLMQueryProcessor:
         top_k: int = 10,
         sentiment_filter: Optional[str] = None
     ) -> Tuple[List[NewsArticle], QueryRouterSchema]:
-        """
-        NEW: Main entry point that returns both results AND routing decision.
-        This eliminates the need for double LLM calls.
+        """Main entry point: Returns both results and the routing decision."""
         
-        Args:
-            query: User's natural language query
-            top_k: Number of results to return
-            sentiment_filter: Optional sentiment filter override
-            
-        Returns:
-            Tuple of (articles, routing_decision)
-        """
-        # Step 1: Route query using LLM (SINGLE CALL)
+        # 1. Route query using LLM
         routing = self.query_router.route_query(query)
         
-        # Override sentiment filter if provided
         if sentiment_filter:
             routing.sentiment_filter = sentiment_filter
         
-        # Step 2: Execute strategy-specific search
+        # 2. Execute strategy-specific search (fetching extra for reranking)
         results = self._execute_strategy(routing, top_k * 2)
         
-        # Step 3: Rerank results
+        # 3. Rerank results
         ranked_results = self._rerank_by_relevance(results, routing)
         
-        # Step 4: Apply minimum similarity threshold
+        # 4. Filter by minimum similarity threshold
         min_similarity = self.config.query_processing.min_similarity
         filtered_results = [
             r for r in ranked_results 
             if r.get("final_score", 0.0) >= min_similarity
         ]
         
-        # Step 5: Convert to NewsArticle objects
+        # 5. Convert to objects
         articles = self._results_to_articles(filtered_results[:top_k])
         
-        # Return both articles and routing decision
         return articles, routing
     
     def process_query(
@@ -583,17 +524,6 @@ class LLMQueryProcessor:
         top_k: int = 10,
         sentiment_filter: Optional[str] = None
     ) -> List[NewsArticle]:
-        """
-        Legacy entry point for backward compatibility.
-        Uses process_query_with_routing but only returns articles.
-        
-        Args:
-            query: User's natural language query
-            top_k: Number of results to return
-            sentiment_filter: Optional sentiment filter override
-            
-        Returns:
-            List of NewsArticle objects ranked by relevance
-        """
+        """Legacy wrapper for process_query_with_routing."""
         articles, _ = self.process_query_with_routing(query, top_k, sentiment_filter)
         return articles
