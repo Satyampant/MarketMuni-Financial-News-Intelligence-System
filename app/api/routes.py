@@ -275,6 +275,261 @@ async def query_articles(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Query error: {str(e)}")
 
+@router.post("/query/explain", tags=["Query"])
+async def explain_query(query_text: str = Query(..., description="Natural language query to explain")):
+    """
+    Debug endpoint: Show how LLM routes and expands query.
+    
+    This endpoint provides transparency into the query processing pipeline:
+    - How the LLM interprets the query
+    - Which strategy is selected
+    - What entities are extracted
+    - What metadata filters would be applied
+    
+    Useful for debugging and understanding query behavior.
+    """
+    try:
+        if not query_text.strip():
+            raise HTTPException(status_code=400, detail="Query cannot be empty")
+        
+        # Route query using LLM (same logic as actual query processing)
+        routing = news_graph.query_router.route_query(query_text)
+        
+        # Generate suggested ChromaDB where clause based on routing
+        suggested_where_clause = _generate_where_clause(routing)
+        
+        return {
+            "original_query": query_text,
+            "routing_decision": {
+                "strategy": routing.strategy.value,
+                "confidence": routing.confidence,
+                "reasoning": routing.reasoning
+            },
+            "extracted_entities": {
+                "companies": routing.entities,
+                "stock_symbols": routing.stock_symbols,
+                "sectors": routing.sectors,
+                "regulators": routing.regulators
+            },
+            "query_refinements": {
+                "refined_query": routing.refined_query,
+                "sentiment_filter": routing.sentiment_filter,
+                "temporal_scope": routing.temporal_scope
+            },
+            "metadata_filters": {
+                "suggested_where_clause": suggested_where_clause,
+                "explanation": _explain_where_clause(routing)
+            }
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Query explanation error: {str(e)}")
+
+
+def _generate_where_clause(routing: QueryRouterSchema) -> dict:
+    """
+    Generate ChromaDB where filter based on routing strategy.
+    
+    This helper translates the routing decision into actual ChromaDB metadata filters
+    that would be used during search.
+    
+    Args:
+        routing: Query routing schema from LLM
+        
+    Returns:
+        ChromaDB where clause dict (or None if no filtering needed)
+    """
+    if routing.strategy == QueryIntent.DIRECT_ENTITY:
+        # Direct entity strategy: Filter by stock symbols or company names
+        if routing.stock_symbols:
+            # Prefer stock symbol filtering (highest precision)
+            if len(routing.stock_symbols) == 1:
+                symbol = routing.stock_symbols[0]
+                return {
+                    "$or": [
+                        {"impacted_stocks": {"$contains": f'"{symbol}"'}},
+                        {"impacted_stocks": {"$contains": f"'{symbol}'"}}
+                    ]
+                }
+            else:
+                # Multiple symbols - use OR logic
+                conditions = []
+                for symbol in routing.stock_symbols:
+                    conditions.extend([
+                        {"impacted_stocks": {"$contains": f'"{symbol}"'}},
+                        {"impacted_stocks": {"$contains": f"'{symbol}'"}}
+                    ])
+                return {"$or": conditions}
+        
+        elif routing.entities:
+            # Fallback to company name filtering
+            if len(routing.entities) == 1:
+                return {"entities": {"$contains": f'"{routing.entities[0]}"'}}
+            else:
+                return {
+                    "$or": [
+                        {"entities": {"$contains": f'"{entity}"'}}
+                        for entity in routing.entities
+                    ]
+                }
+        
+        return None
+    
+    elif routing.strategy == QueryIntent.SECTOR_WIDE:
+        # Sector strategy: Filter by sector names
+        if routing.sectors:
+            if len(routing.sectors) == 1:
+                return {"entities": {"$contains": f'"{routing.sectors[0]}"'}}
+            else:
+                return {
+                    "$or": [
+                        {"entities": {"$contains": f'"{sector}"'}}
+                        for sector in routing.sectors
+                    ]
+                }
+        return None
+    
+    elif routing.strategy == QueryIntent.REGULATORY:
+        # Regulatory strategy: Filter by regulator names
+        if routing.regulators:
+            if len(routing.regulators) == 1:
+                return {"entities": {"$contains": f'"{routing.regulators[0]}"'}}
+            else:
+                return {
+                    "$or": [
+                        {"entities": {"$contains": f'"{regulator}"'}}
+                        for regulator in routing.regulators
+                    ]
+                }
+        return None
+    
+    elif routing.strategy == QueryIntent.SENTIMENT_DRIVEN:
+        # Sentiment strategy: Filter by sentiment + optional sectors
+        if routing.sentiment_filter:
+            base_filter = {"sentiment_classification": routing.sentiment_filter}
+            
+            if routing.sectors:
+                # Combine sentiment filter with sector filter
+                sector_conditions = [
+                    {"entities": {"$contains": f'"{sector}"'}}
+                    for sector in routing.sectors
+                ]
+                
+                if len(routing.sectors) == 1:
+                    return {
+                        "$and": [
+                            base_filter,
+                            sector_conditions[0]
+                        ]
+                    }
+                else:
+                    return {
+                        "$and": [
+                            base_filter,
+                            {"$or": sector_conditions}
+                        ]
+                    }
+            
+            return base_filter
+        return None
+    
+    elif routing.strategy == QueryIntent.CROSS_IMPACT:
+        # Cross-impact strategy: Filter by multiple sectors
+        if len(routing.sectors) >= 2:
+            return {
+                "$or": [
+                    {"entities": {"$contains": f'"{sector}"'}}
+                    for sector in routing.sectors
+                ]
+            }
+        elif routing.sectors:
+            return {"entities": {"$contains": f'"{routing.sectors[0]}"'}}
+        return None
+    
+    elif routing.strategy == QueryIntent.TEMPORAL:
+        # Temporal strategy: Falls back to entity filtering if available
+        if routing.stock_symbols:
+            symbol = routing.stock_symbols[0]
+            return {
+                "$or": [
+                    {"impacted_stocks": {"$contains": f'"{symbol}"'}},
+                    {"impacted_stocks": {"$contains": f"'{symbol}'"}}
+                ]
+            }
+        elif routing.entities:
+            return {"entities": {"$contains": f'"{routing.entities[0]}"'}}
+        return None
+    
+    elif routing.strategy == QueryIntent.SEMANTIC_SEARCH:
+        # Semantic search: No metadata filtering (pure vector search)
+        return None
+    
+    return None
+
+
+def _explain_where_clause(routing: QueryRouterSchema) -> str:
+    """
+    Generate human-readable explanation of the metadata filter.
+    
+    Args:
+        routing: Query routing schema from LLM
+        
+    Returns:
+        Plain English explanation of what the filter does
+    """
+    if routing.strategy == QueryIntent.DIRECT_ENTITY:
+        if routing.stock_symbols:
+            symbols = ", ".join(routing.stock_symbols)
+            return f"Filter articles where impacted_stocks contains any of: {symbols}"
+        elif routing.entities:
+            entities = ", ".join(routing.entities)
+            return f"Filter articles where entities mention: {entities}"
+        return "No metadata filtering (semantic search on entities)"
+    
+    elif routing.strategy == QueryIntent.SECTOR_WIDE:
+        if routing.sectors:
+            sectors = ", ".join(routing.sectors)
+            return f"Filter articles related to sectors: {sectors}"
+        return "No sector filtering available"
+    
+    elif routing.strategy == QueryIntent.REGULATORY:
+        if routing.regulators:
+            regulators = ", ".join(routing.regulators)
+            return f"Filter articles mentioning regulators: {regulators}"
+        return "No regulator filtering available"
+    
+    elif routing.strategy == QueryIntent.SENTIMENT_DRIVEN:
+        if routing.sentiment_filter:
+            explanation = f"Filter articles with sentiment: {routing.sentiment_filter}"
+            if routing.sectors:
+                sectors = ", ".join(routing.sectors)
+                explanation += f" AND in sectors: {sectors}"
+            return explanation
+        return "No sentiment filtering available"
+    
+    elif routing.strategy == QueryIntent.CROSS_IMPACT:
+        if len(routing.sectors) >= 2:
+            sectors = ", ".join(routing.sectors)
+            return f"Filter articles mentioning multiple sectors: {sectors} (supply chain analysis)"
+        elif routing.sectors:
+            return f"Filter articles in sector: {routing.sectors[0]}"
+        return "No cross-impact filtering available"
+    
+    elif routing.strategy == QueryIntent.TEMPORAL:
+        explanation = "Time-based filtering with "
+        if routing.stock_symbols:
+            explanation += f"stock symbols: {', '.join(routing.stock_symbols)}"
+        elif routing.entities:
+            explanation += f"entities: {', '.join(routing.entities)}"
+        else:
+            explanation += "semantic search (no metadata filters)"
+        return explanation
+    
+    elif routing.strategy == QueryIntent.SEMANTIC_SEARCH:
+        return "Pure semantic vector search - no metadata filtering applied"
+    
+    return "Unknown strategy - no filtering"
+
 @router.get("/stats", response_model=StatsResponse, tags=["Statistics"])
 async def get_stats():
     try:
