@@ -77,6 +77,16 @@ class VectorStoreConfig:
 
 
 @dataclass
+class LLMRoutingConfig:
+    """LLM-based query routing configuration."""
+    enabled: bool = True
+    confidence_threshold: float = 0.6
+    fallback_strategy: str = "semantic_search"
+    max_entities_per_query: int = 10
+    enable_query_expansion: bool = True
+
+
+@dataclass
 class MultiQueryConfig:
     max_context_queries: int = 3
     initial_retrieval_multiplier: int = 2
@@ -98,6 +108,8 @@ class SentimentBoostConfig:
 class QueryProcessingConfig:
     default_top_k: int = 10
     min_similarity: float = 0.3
+    llm_routing: LLMRoutingConfig = field(default_factory=LLMRoutingConfig)
+    strategy_weights: Dict[str, float] = field(default_factory=dict)
     multi_query: MultiQueryConfig = field(default_factory=MultiQueryConfig)
     reranking_weights: Dict[str, RerankingWeights] = field(default_factory=dict)
     sentiment_boost: SentimentBoostConfig = field(default_factory=SentimentBoostConfig)
@@ -292,9 +304,24 @@ def load_config(config_path: Optional[Path] = None) -> Config:
                 distance_metric=vs.get('distance_metric', 'cosine')
             )
         
-        # --- Query Processing ---
+        # --- Query Processing (UPDATED WITH LLM ROUTING) ---
         if 'query_processing' in yaml_data:
             qp = yaml_data['query_processing']
+            
+            # LLM Routing Config
+            llm_routing = LLMRoutingConfig()
+            if 'llm_routing' in qp:
+                lr = qp['llm_routing']
+                llm_routing = LLMRoutingConfig(
+                    enabled=lr.get('enabled', True),
+                    confidence_threshold=lr.get('confidence_threshold', 0.6),
+                    fallback_strategy=lr.get('fallback_strategy', 'semantic_search'),
+                    max_entities_per_query=lr.get('max_entities_per_query', 10),
+                    enable_query_expansion=lr.get('enable_query_expansion', True)
+                )
+            
+            # Strategy Weights
+            strategy_weights = qp.get('strategy_weights', {})
             
             multi_query = MultiQueryConfig()
             if 'multi_query' in qp:
@@ -323,6 +350,8 @@ def load_config(config_path: Optional[Path] = None) -> Config:
             config.query_processing = QueryProcessingConfig(
                 default_top_k=qp.get('default_top_k', 10),
                 min_similarity=qp.get('min_similarity', 0.3),
+                llm_routing=llm_routing,
+                strategy_weights=strategy_weights,
                 multi_query=multi_query,
                 reranking_weights=reranking_weights,
                 sentiment_boost=sentiment_boost
@@ -345,7 +374,7 @@ def load_config(config_path: Optional[Path] = None) -> Config:
                 weight_decay=sc.get('weight_decay', 0.8)
             )
         
-        # --- LLM Configuration (NEW) ---
+        # --- LLM Configuration ---
         if 'llm' in yaml_data:
             llm = yaml_data['llm']
             
@@ -380,7 +409,7 @@ def load_config(config_path: Optional[Path] = None) -> Config:
                 features=features_config
             )
 
-        # --- Redis Configuration (NEW) ---
+        # --- Redis Configuration ---
         if 'redis' in yaml_data:
             redis_config = yaml_data['redis']
             

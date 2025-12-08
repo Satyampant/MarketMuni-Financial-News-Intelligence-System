@@ -58,18 +58,37 @@ vector_store:
   distance_metric: "cosine"
 
 # ----------------------------------------------------------------------------
-# QUERY PROCESSING
+# QUERY PROCESSING (UPDATED WITH LLM ROUTING)
 # ----------------------------------------------------------------------------
 query_processing:
   default_top_k: 10
   min_similarity: 0.3
+  
+  # LLM-based query routing configuration
+  llm_routing:
+    enabled: true
+    confidence_threshold: 0.6  # Minimum confidence for strategy selection
+    fallback_strategy: "semantic_search"  # If confidence too low
+    max_entities_per_query: 10
+    enable_query_expansion: true
+  
+  # Strategy-specific weights for reranking
+  strategy_weights:
+    direct_entity: 0.7  # Weight for strategy vs semantic in final score
+    sector_wide: 0.5
+    regulatory: 0.6
+    sentiment_driven: 0.5
+    semantic_search: 0.3
+  
   multi_query:
     max_context_queries: 3
     initial_retrieval_multiplier: 2
+  
   reranking_weights:
     direct_mention:
       strategy_weight: 0.7
       semantic_weight: 0.3
+  
   sentiment_boost:
     enabled: true
     max_multiplier: 1.5
