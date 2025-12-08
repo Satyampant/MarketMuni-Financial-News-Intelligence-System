@@ -1,9 +1,9 @@
 """
-Updated app/workflows/graph.py - With LLM Supply Chain Analysis
-Full LLM pipeline: Entity Extraction → Stock Impact → Sentiment → Supply Chain (LLM-based)
+Updated app/workflows/graph.py - Task 5: Integrate LLM Query Processor
+FIXED: Eliminates double LLM routing calls by using routing result from processor.
 """
 
-from typing import TypedDict, List, Annotated, Optional, Dict, Any
+from typing import TypedDict, List, Annotated, Optional, Dict, Any, Tuple
 import operator
 from datetime import datetime
 
@@ -15,9 +15,10 @@ from app.agents.deduplication import DeduplicationAgent
 from app.agents.llm_entity_extractor import LLMEntityExtractor
 from app.agents.llm_stock_mapper import LLMStockImpactMapper
 from app.agents.llm_sentiment import LLMSentimentAnalyzer
-from app.agents.llm_supply_chain import LLMSupplyChainAnalyzer  # NEW: LLM supply chain
+from app.agents.llm_supply_chain import LLMSupplyChainAnalyzer
 from app.services.vector_store import VectorStore
-from app.agents.query_processor import QueryProcessor
+from app.agents.llm_query_router import LLMQueryRouter
+from app.agents.llm_query_processor import LLMQueryProcessor
 from app.core.config_loader import get_config
 from app.core.llm_schemas import EntityExtractionSchema, SentimentAnalysisSchema
 
@@ -44,7 +45,7 @@ class NewsIntelligenceState(TypedDict):
 class NewsIntelligenceGraph:
     """
     LangGraph-based multi-agent pipeline for financial news intelligence.
-    Fully LLM-powered approach for all agents.
+    Fully LLM-powered approach for all agents including query processing.
     """
     
     def __init__(
@@ -55,7 +56,7 @@ class NewsIntelligenceGraph:
         entity_extractor: Optional[LLMEntityExtractor] = None,
         stock_mapper: Optional[LLMStockImpactMapper] = None,
         sentiment_analyzer: Optional[LLMSentimentAnalyzer] = None,
-        supply_chain_analyzer: Optional[LLMSupplyChainAnalyzer] = None  # NEW: LLM supply chain
+        supply_chain_analyzer: Optional[LLMSupplyChainAnalyzer] = None
     ):
         config = get_config()
 
@@ -77,14 +78,17 @@ class NewsIntelligenceGraph:
             use_entity_context=True
         )
         
-        # NEW: LLM supply chain analyzer (replaces rule-based approach)
+        # LLM supply chain analyzer
         self.supply_chain_analyzer = supply_chain_analyzer or LLMSupplyChainAnalyzer()
         
-        # Query processor (uses legacy entity extractor for query expansion)
-        self.query_processor = QueryProcessor(
+        # NEW: LLM Query Router (Task 2)
+        self.query_router = LLMQueryRouter()
+        
+        # NEW: LLM Query Processor (Task 3)
+        self.query_processor = LLMQueryProcessor(
             vector_store=self.vector_store,
-            entity_extractor=self.entity_extractor,
-            stock_mapper=self.stock_mapper
+            query_router=self.query_router,
+            config=config
         )
         
         self.app = self._build_ingestion_graph()
@@ -95,6 +99,7 @@ class NewsIntelligenceGraph:
         print("  - Stock impact mapping: LLM")
         print("  - Sentiment analysis: LLM")
         print("  - Supply chain analysis: LLM")
+        print("  - Query processing: LLM-based routing and execution")
     
     def _build_ingestion_graph(self):
         """Construct the main news ingestion and analysis pipeline."""
@@ -152,7 +157,7 @@ class NewsIntelligenceGraph:
         
         return {
             "current_article": article,
-            "article_embedding": article_embedding,  # Pass to next nodes
+            "article_embedding": article_embedding,
             "stats": {
                 "ingestion_time": datetime.now().isoformat(),
                 "article_id": article.id,
@@ -161,29 +166,23 @@ class NewsIntelligenceGraph:
         }
     
     def _deduplication_agent(self, state: NewsIntelligenceState) -> dict:
-        """
-        FIXED: Uses pre-computed embedding from state.
-        No redundant computation. No dual models.
-        """
+        """Uses pre-computed embedding from state."""
         article = state["current_article"]
         article_embedding = state.get("article_embedding")
         
         if not article_embedding:
-            # Fallback: compute if not in state (shouldn't happen)
             print("⚠ Warning: Embedding not found in state, computing...")
             article_embedding = self.vector_store.create_embedding(
                 f"{article.title}. {article.content}"
             )
         
-        # Use vector search with pre-computed embedding
         try:
             duplicate_ids = self.dedup_agent.find_duplicates_with_vector_search(
                 article,
-                article_embedding,  # REUSE embedding
+                article_embedding,
                 self.vector_store
             )
         except Exception as e:
-            # Graceful fallback for empty DB or errors
             print(f"⚠ Vector search failed: {e}")
             duplicate_ids = []
         
@@ -193,23 +192,21 @@ class NewsIntelligenceGraph:
         stats["deduplication_method"] = "vector_search"
         
         if duplicate_ids:
-            # Fetch only the duplicate articles (not all articles)
             duplicates = [self.storage.get_by_id(dup_id) for dup_id in duplicate_ids]
-            duplicates = [d for d in duplicates if d is not None]  # Filter None
+            duplicates = [d for d in duplicates if d is not None]
             duplicates.append(article)
             
-            # Consolidate duplicates (keep earliest, merge sources)
             consolidated = self.dedup_agent.consolidate_duplicates(duplicates)
             
             return {
                 "current_article": consolidated,
-                "article_embedding": article_embedding,  # Keep passing it
+                "article_embedding": article_embedding,
                 "duplicates": duplicate_ids,
                 "stats": stats
             }
         
         return {
-            "article_embedding": article_embedding,  # Keep passing it
+            "article_embedding": article_embedding,
             "duplicates": [], 
             "stats": stats
         }
@@ -218,10 +215,8 @@ class NewsIntelligenceGraph:
         """Extracts entities using LLM with structured output."""
         article = state["current_article"]
         
-        # LLM extraction returns EntityExtractionSchema
         entities_schema = self.entity_extractor.extract_entities(article)
         
-        # Store rich data in article
         article.set_entities_rich(entities_schema)
         
         stats = state.get("stats", {})
@@ -258,17 +253,14 @@ class NewsIntelligenceGraph:
         entities_schema = state["entities_schema"]
         
         if not entities_schema:
-            # Fallback: reconstruct from article.entities_rich
             from app.core.llm_schemas import EntityExtractionSchema
             if hasattr(article, 'entities_rich') and article.entities_rich:
                 entities_schema = EntityExtractionSchema.model_validate(article.entities_rich)
             else:
                 raise ValueError("No entity schema available for impact mapping")
         
-        # LLM-based impact mapping
         impact_result = self.stock_mapper.map_to_stocks(entities_schema, article)
         
-        # Convert to legacy format and attach to article
         impact_dicts = [
             {
                 "symbol": stock.symbol,
@@ -302,15 +294,12 @@ class NewsIntelligenceGraph:
         article = state["current_article"]
         entities_schema = state.get("entities_schema")
         
-        # Reconstruct entity schema if not in state
         if not entities_schema and hasattr(article, 'entities_rich') and article.entities_rich:
             from app.core.llm_schemas import EntityExtractionSchema
             entities_schema = EntityExtractionSchema.model_validate(article.entities_rich)
         
-        # LLM sentiment analysis with entity context
         sentiment_schema = self.sentiment_analyzer.analyze_sentiment(article, entities_schema)
         
-        # Attach to article (convert to legacy format)
         self.sentiment_analyzer.analyze_and_attach(article, entities_schema)
         sentiment_data = article.get_sentiment()
         
@@ -325,7 +314,6 @@ class NewsIntelligenceGraph:
                 "sentiment_method": sentiment_data.analysis_method
             })
             
-            # Extract key factors count
             key_factors = sentiment_data.sentiment_breakdown.get("key_factors", [])
             stats["sentiment_key_factors_count"] = len(key_factors)
         
@@ -337,15 +325,11 @@ class NewsIntelligenceGraph:
         }
     
     def _cross_impact_agent(self, state: NewsIntelligenceState) -> dict:
-        """
-        Analyzes supply chain relationships using LLM reasoning.
-        UPDATED: Uses LLMSupplyChainAnalyzer instead of rule-based approach.
-        """
+        """Analyzes supply chain relationships using LLM reasoning."""
         article = state["current_article"]
         entities_schema = state.get("entities_schema")
         sentiment_schema = state.get("sentiment_schema")
         
-        # Reconstruct schemas if not in state
         if not entities_schema and hasattr(article, 'entities_rich') and article.entities_rich:
             from app.core.llm_schemas import EntityExtractionSchema
             entities_schema = EntityExtractionSchema.model_validate(article.entities_rich)
@@ -362,7 +346,6 @@ class NewsIntelligenceGraph:
                 entity_influence=sentiment_data.sentiment_breakdown.get("entity_influence")
             )
         
-        # Check if we have required data for supply chain analysis
         if not entities_schema or not sentiment_schema:
             stats = state.get("stats", {})
             stats.update({
@@ -378,7 +361,6 @@ class NewsIntelligenceGraph:
                 "stats": stats
             }
         
-        # Check if sectors are present (required for supply chain analysis)
         if not entities_schema.sectors:
             stats = state.get("stats", {})
             stats.update({
@@ -394,12 +376,10 @@ class NewsIntelligenceGraph:
                 "stats": stats
             }
         
-        # LLM-based supply chain analysis
         supply_chain_result = self.supply_chain_analyzer.generate_cross_impact_insights(
             article, entities_schema, sentiment_schema
         )
         
-        # Convert to legacy format and attach to article
         all_impacts = (
             supply_chain_result.upstream_impacts +
             supply_chain_result.downstream_impacts
@@ -446,20 +426,15 @@ class NewsIntelligenceGraph:
         }
     
     def _indexing_agent(self, state: NewsIntelligenceState) -> dict:
-        """
-        FIXED: Reuses pre-computed embedding instead of recalculating.
-        """
+        """Reuses pre-computed embedding for indexing."""
         article = state["current_article"]
         article_embedding = state.get("article_embedding")
         
-        # Store article in memory storage
         self.storage.add_article(article)
         
-        # Index with pre-computed embedding (no redundant computation)
         if article_embedding:
             self.vector_store.index_article(article, embedding=article_embedding)
         else:
-            # Fallback: compute if not in state
             print("⚠ Warning: Embedding not found at indexing, computing...")
             self.vector_store.index_article(article)
         
@@ -475,9 +450,14 @@ class NewsIntelligenceGraph:
         }
     
     def _query_agent(self, state: NewsIntelligenceState) -> dict:
-        """Retrieves relevant articles based on query and sentiment filter."""
+        """
+        FIXED: Retrieves relevant articles using LLM-based query routing and processing.
+        Single LLM call for routing - no redundant calls.
+        """
         query_text = state.get("query_text")
         sentiment_filter = state.get("sentiment_filter")
+        
+        config = get_config()
 
         if not query_text:
             return {"error": "No query text provided"}
@@ -487,18 +467,29 @@ class NewsIntelligenceGraph:
             if sentiment_filter not in valid_sentiments:
                 return {"error": f"Invalid sentiment filter: {sentiment_filter}. Must be {valid_sentiments}"}
         
-        results = self.query_processor.process_query(
-            query_text, 
-            top_k=10, 
+        # FIXED: Call process_query_with_routing which returns both results AND routing
+        results, routing = self.query_processor.process_query_with_routing(
+            query_text,
+            top_k=config.query_processing.default_top_k,
             sentiment_filter=sentiment_filter
         )
         
+        # Build stats using the routing information from the same call
         stats = {
             "query_time": datetime.now().isoformat(),
             "results_count": len(results),
             "query": query_text,
             "sentiment_filter": sentiment_filter,
-            "sentiment_filter_applied": sentiment_filter is not None
+            "sentiment_filter_applied": sentiment_filter is not None,
+            "query_routing": {
+                "strategy": routing.strategy.value,
+                "entities_identified": len(routing.entities),
+                "sectors_identified": len(routing.sectors),
+                "regulators_identified": len(routing.regulators),
+                "refined_query": routing.refined_query,
+                "routing_confidence": routing.confidence,
+                "routing_reasoning": routing.reasoning
+            }
         }
         
         return {
@@ -556,17 +547,13 @@ class NewsIntelligenceGraph:
         
         sentiment_stats = self.vector_store.get_sentiment_statistics()
         
-        # Entity extraction stats
         entity_stats = self.entity_extractor.get_cache_stats()
         
-        # Stock impact stats
         articles = self.storage.get_all_articles()
         stock_impact_stats = self.stock_mapper.get_impact_statistics(articles)
         
-        # Sentiment statistics from analyzer
         sentiment_analyzer_stats = self.sentiment_analyzer.get_sentiment_statistics(articles)
         
-        # NEW: Supply chain statistics from LLM analyzer
         supply_chain_stats = self.supply_chain_analyzer.get_impact_statistics(articles)
         
         return {
@@ -592,6 +579,11 @@ class NewsIntelligenceGraph:
             "supply_chain_analysis": {
                 "method": "llm",
                 "statistics": supply_chain_stats
+            },
+            "query_processing": {
+                "method": "llm_routing",
+                "router": "LLMQueryRouter",
+                "processor": "LLMQueryProcessor"
             },
             "status": "operational"
         }
