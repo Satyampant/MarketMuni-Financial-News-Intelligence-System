@@ -68,43 +68,7 @@ class RedisConfig:
 class DeduplicationConfig:
     bi_encoder_threshold: float = 0.50
     cross_encoder_threshold: float = 0.70
-    bi_encoder_model: str = "all-mpnet-base-v2"
     cross_encoder_model: str = "cross-encoder/stsb-distilroberta-base"
-
-
-@dataclass
-class EntityExtractionConfig:
-    spacy_model: str = "en_core_web_sm"
-    use_spacy: bool = True
-    event_keywords: list = field(default_factory=list)
-
-
-@dataclass
-class HybridWeights:
-    finbert_weight: float = 0.7
-    rule_weight: float = 0.3
-
-
-@dataclass
-class FinBERTConfig:
-    model_name: str = "ProsusAI/finbert"
-    device: Optional[str] = None
-
-
-@dataclass
-class RuleBasedConfig:
-    spacy_model: str = "en_core_web_sm"
-    use_spacy: bool = True
-
-
-@dataclass
-class SentimentAnalysisConfig:
-    method: str = "hybrid"
-    hybrid_weights: HybridWeights = field(default_factory=HybridWeights)
-    finbert: FinBERTConfig = field(default_factory=FinBERTConfig)
-    rule_based: RuleBasedConfig = field(default_factory=RuleBasedConfig)
-    entity_weights: Dict[str, float] = field(default_factory=dict)
-    event_modifiers: Dict[str, float] = field(default_factory=dict)
 
 
 @dataclass
@@ -243,7 +207,6 @@ class Config:
     """Main configuration class containing all settings."""
     deduplication: DeduplicationConfig = field(default_factory=DeduplicationConfig)
     entity_extraction: EntityExtractionConfig = field(default_factory=EntityExtractionConfig)
-    sentiment_analysis: SentimentAnalysisConfig = field(default_factory=SentimentAnalysisConfig)
     vector_store: VectorStoreConfig = field(default_factory=VectorStoreConfig)
     query_processing: QueryProcessingConfig = field(default_factory=QueryProcessingConfig)
     stock_impact: StockImpactConfig = field(default_factory=StockImpactConfig)
@@ -274,7 +237,6 @@ def load_config(config_path: Optional[Path] = None) -> Config:
         config.deduplication = DeduplicationConfig(
             bi_encoder_threshold=dedup.get('bi_encoder_threshold', 0.50),
             cross_encoder_threshold=dedup.get('cross_encoder_threshold', 0.70),
-            bi_encoder_model=dedup.get('bi_encoder_model', 'all-mpnet-base-v2'),
             cross_encoder_model=dedup.get('cross_encoder_model', 'cross-encoder/stsb-distilroberta-base')
         )
         
@@ -289,36 +251,6 @@ def load_config(config_path: Optional[Path] = None) -> Config:
         # --- Sentiment Analysis ---
         sentiment = yaml_data['sentiment_analysis']
         
-        hybrid_weights = HybridWeights()
-        hw = sentiment['hybrid_weights']
-        hybrid_weights = HybridWeights(
-            finbert_weight=hw.get('finbert_weight', 0.7),
-            rule_weight=hw.get('rule_weight', 0.3)
-        )
-        
-        finbert_config = FinBERTConfig()
-        fb = sentiment['finbert']
-        finbert_config = FinBERTConfig(
-            model_name=fb.get('model_name', 'ProsusAI/finbert'),
-            device=fb.get('device')
-        )
-        
-        rule_config = RuleBasedConfig()
-        rb = sentiment['rule_based']
-        rule_config = RuleBasedConfig(
-            spacy_model=rb.get('spacy_model', 'en_core_web_sm'),
-            use_spacy=rb.get('use_spacy', True)
-        )
-        
-        config.sentiment_analysis = SentimentAnalysisConfig(
-            method=sentiment.get('method', 'hybrid'),
-            hybrid_weights=hybrid_weights,
-            finbert=finbert_config,
-            rule_based=rule_config,
-            entity_weights=sentiment.get('entity_weights', {}),
-            event_modifiers=sentiment.get('event_modifiers', {})
-        )
-    
         # --- Vector Store ---
         vs = yaml_data['vector_store']
         config.vector_store = VectorStoreConfig(

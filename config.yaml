@@ -21,7 +21,6 @@ redis:
 deduplication:
   bi_encoder_threshold: 0.50
   cross_encoder_threshold: 0.70
-  bi_encoder_model: "all-mpnet-base-v2"
   cross_encoder_model: "cross-encoder/stsb-distilroberta-base"
 
 # ----------------------------------------------------------------------------
