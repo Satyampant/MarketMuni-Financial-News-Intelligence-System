@@ -1,6 +1,6 @@
 """
 LLM Query Processor - Strategy Executor with Metadata Filtering
-Executes query strategies based on LLM routing decisions.
+TASK 4: Enhanced Multi-Strategy Result Merging & Reranking
 File: app/agents/llm_query_processor.py
 """
 
@@ -49,20 +49,11 @@ class LLMQueryProcessor:
         """
         Execute direct entity search using stock symbol filtering.
         Uses metadata filter: where={"impacted_stocks": {"$contains": "HDFCBANK"}}
-        
-        Args:
-            routing: Query routing decision with extracted entities
-            top_k: Number of results to retrieve
-            
-        Returns:
-            List of matching articles
         """
         results = []
         
         # Search by stock symbols (highest precision)
         for symbol in routing.stock_symbols:
-            # ChromaDB metadata filter for impacted_stocks
-            # Note: impacted_stocks is stored as JSON string, so we search in the raw metadata
             where_filter = {
                 "$or": [
                     {"impacted_stocks": {"$contains": f'"{symbol}"'}},
@@ -80,7 +71,6 @@ class LLMQueryProcessor:
         # Search by company names if no symbols or insufficient results
         if len(results) < top_k and routing.entities:
             for company in routing.entities:
-                # Search in entities.Companies field (JSON)
                 where_filter = {
                     "entities": {"$contains": f'"{company}"'}
                 }
@@ -111,18 +101,10 @@ class LLMQueryProcessor:
         """
         Execute sector-wide search using sector metadata filtering.
         Uses metadata filter: where={"entities": {"$contains": "Banking"}}
-        
-        Args:
-            routing: Query routing decision with extracted sectors
-            top_k: Number of results to retrieve
-            
-        Returns:
-            List of matching articles
         """
         results = []
         
         for sector in routing.sectors:
-            # ChromaDB metadata filter for entities.Sectors (stored as JSON)
             where_filter = {
                 "entities": {"$contains": f'"{sector}"'}
             }
@@ -153,18 +135,10 @@ class LLMQueryProcessor:
         """
         Execute regulatory search using regulator metadata filtering.
         Uses metadata filter: where={"entities": {"$contains": "RBI"}}
-        
-        Args:
-            routing: Query routing decision with extracted regulators
-            top_k: Number of results to retrieve
-            
-        Returns:
-            List of matching articles
         """
         results = []
         
         for regulator in routing.regulators:
-            # ChromaDB metadata filter for entities.Regulators (stored as JSON)
             where_filter = {
                 "entities": {"$contains": f'"{regulator}"'}
             }
@@ -195,16 +169,8 @@ class LLMQueryProcessor:
         """
         Execute sentiment-driven search with sentiment and sector filtering.
         Uses metadata filter: where={"sentiment_classification": "Bullish", "entities": {"$contains": "Tech"}}
-        
-        Args:
-            routing: Query routing decision with sentiment filter and sectors
-            top_k: Number of results to retrieve
-            
-        Returns:
-            List of matching articles
         """
         if not routing.sentiment_filter:
-            # Fallback to semantic search if no sentiment specified
             return self._execute_semantic_strategy(routing, top_k)
         
         results = []
@@ -257,18 +223,11 @@ class LLMQueryProcessor:
         """
         Execute pure semantic search without metadata filters.
         Uses routing.refined_query for vector similarity search.
-        
-        Args:
-            routing: Query routing decision with refined query
-            top_k: Number of results to retrieve
-            
-        Returns:
-            List of matching articles
         """
         results = self.vector_store.search(
             query=routing.refined_query,
             top_k=top_k,
-            where=None  # No metadata filtering
+            where=None
         )
         
         return results
@@ -281,20 +240,10 @@ class LLMQueryProcessor:
         """
         Execute cross-impact search for supply chain relationships.
         Searches for articles mentioning multiple sectors.
-        
-        Args:
-            routing: Query routing decision with multiple sectors
-            top_k: Number of results to retrieve
-            
-        Returns:
-            List of matching articles
         """
         if len(routing.sectors) < 2:
-            # Fallback to sector-wide if insufficient sectors
             return self._execute_sector_wide_strategy(routing, top_k)
         
-        # Search for articles mentioning ANY of the sectors
-        # (cross-impacts are typically identified post-ingestion)
         results = []
         
         for sector in routing.sectors:
@@ -331,16 +280,7 @@ class LLMQueryProcessor:
         """
         Execute temporal search with time-based filtering.
         Falls back to entity search with temporal query refinement.
-        
-        Args:
-            routing: Query routing decision with temporal scope
-            top_k: Number of results to retrieve
-            
-        Returns:
-            List of matching articles
         """
-        # For now, use entity-based search with temporal query
-        # (ChromaDB timestamp filtering would require date parsing)
         if routing.entities or routing.stock_symbols:
             return self._execute_direct_entity_strategy(routing, top_k)
         else:
@@ -353,13 +293,6 @@ class LLMQueryProcessor:
     ) -> List[Dict[str, Any]]:
         """
         Dispatch to appropriate strategy executor based on routing.strategy.
-        
-        Args:
-            routing: Query routing decision
-            top_k: Number of results to retrieve
-            
-        Returns:
-            List of matching articles
         """
         strategy_map = {
             QueryIntent.DIRECT_ENTITY: self._execute_direct_entity_strategy,
@@ -379,6 +312,48 @@ class LLMQueryProcessor:
         
         return executor(routing, top_k)
     
+    # ============================================================================
+    # TASK 4: Multi-Strategy Result Merging & Reranking
+    # ============================================================================
+    
+    def _merge_results(
+        self,
+        primary_results: List[Dict[str, Any]],
+        context_results: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """
+        Merge and deduplicate results from multiple strategies.
+        Keeps highest similarity score per article_id.
+        
+        Args:
+            primary_results: Results from primary strategy execution
+            context_results: Additional context results from other strategies
+            
+        Returns:
+            Deduplicated merged results with best scores retained
+        """
+        # Use dict to track best result per article_id
+        merged = {}
+        
+        # Process all results
+        all_results = primary_results + context_results
+        
+        for result in all_results:
+            article_id = result["article_id"]
+            current_similarity = result.get("similarity", 0.0)
+            
+            if article_id not in merged:
+                # First occurrence - add directly
+                merged[article_id] = result
+            else:
+                # Compare similarity scores and keep higher one
+                existing_similarity = merged[article_id].get("similarity", 0.0)
+                if current_similarity > existing_similarity:
+                    merged[article_id] = result
+        
+        # Convert back to list
+        return list(merged.values())
+    
     def _calculate_strategy_score(
         self,
         result: Dict[str, Any],
@@ -386,6 +361,14 @@ class LLMQueryProcessor:
     ) -> float:
         """
         Calculate strategy match score based on metadata alignment.
+        
+        Scoring Logic:
+        - Direct entity match (company/stock): 1.0
+        - Sector match: 0.8
+        - Regulator match: 1.0
+        - Sentiment match: 0.7-0.9 (depending on sector alignment)
+        - Cross-impact: 0.5-0.8 (based on has_cross_impacts)
+        - Semantic fallback: 0.3
         
         Args:
             result: Search result with metadata
@@ -417,10 +400,20 @@ class LLMQueryProcessor:
         if routing.strategy == QueryIntent.DIRECT_ENTITY:
             # Check company/stock match
             article_companies = entities.get("Companies", [])
-            company_match = any(c in article_companies for c in routing.entities)
+            company_match = any(
+                entity.lower() in [c.lower() for c in article_companies]
+                for entity in routing.entities
+            )
             
-            stock_symbols = [s.get("symbol", "") for s in impacted_stocks]
-            stock_match = any(sym in stock_symbols for sym in routing.stock_symbols)
+            # Check stock symbol match
+            stock_symbols = [
+                s.get("symbol", "").upper() if isinstance(s, dict) else str(s).upper()
+                for s in impacted_stocks
+            ]
+            stock_match = any(
+                symbol.upper() in stock_symbols
+                for symbol in routing.stock_symbols
+            )
             
             if company_match or stock_match:
                 strategy_score = 1.0
@@ -428,7 +421,10 @@ class LLMQueryProcessor:
         elif routing.strategy == QueryIntent.SECTOR_WIDE:
             # Check sector match
             article_sectors = entities.get("Sectors", [])
-            sector_match = any(s in article_sectors for s in routing.sectors)
+            sector_match = any(
+                sector.lower() in [s.lower() for s in article_sectors]
+                for sector in routing.sectors
+            )
             
             if sector_match:
                 strategy_score = 0.8
@@ -436,7 +432,10 @@ class LLMQueryProcessor:
         elif routing.strategy == QueryIntent.REGULATORY:
             # Check regulator match
             article_regulators = entities.get("Regulators", [])
-            regulator_match = any(r in article_regulators for r in routing.regulators)
+            regulator_match = any(
+                regulator.lower() in [r.lower() for r in article_regulators]
+                for regulator in routing.regulators
+            )
             
             if regulator_match:
                 strategy_score = 1.0
@@ -452,7 +451,10 @@ class LLMQueryProcessor:
                 
                 # Boost if sector also matches
                 article_sectors = entities.get("Sectors", [])
-                sector_match = any(s in article_sectors for s in routing.sectors)
+                sector_match = any(
+                    sector.lower() in [s.lower() for s in article_sectors]
+                    for sector in routing.sectors
+                )
                 if sector_match:
                     strategy_score = 0.9
         
@@ -469,7 +471,28 @@ class LLMQueryProcessor:
         
         return strategy_score
     
-    def _rerank_results(
+    def _apply_sentiment_boost(
+        self,
+        score: float,
+        sentiment_signal: float
+    ) -> float:
+        """
+        Amplify scores for high-signal articles.
+        
+        Formula: sentiment_boost = 1.0 + (signal_strength / 200.0)
+        Max boost: 1.5x (when signal_strength = 100)
+        
+        Args:
+            score: Base score to amplify
+            sentiment_signal: Sentiment signal strength (0-100)
+            
+        Returns:
+            Boosted score
+        """
+        sentiment_boost = 1.0 + (sentiment_signal / 200.0)
+        return score * sentiment_boost
+    
+    def _rerank_by_relevance(
         self,
         results: List[Dict[str, Any]],
         routing: QueryRouterSchema
@@ -477,26 +500,33 @@ class LLMQueryProcessor:
         """
         Rerank results by combining semantic similarity, strategy match, and sentiment signal.
         
+        Scoring Formula:
+        1. base_score = (strategy_score * 0.5) + (semantic_similarity * 0.5)
+        2. sentiment_boost = 1.0 + (signal_strength / 200.0)  # Max 1.5x
+        3. final_score = base_score * sentiment_boost * cross_impact_boost
+        4. Cap at 1.0
+        
         Args:
             results: Raw search results
             routing: Query routing decision
             
         Returns:
-            Reranked results with final_score
+            Reranked results with final_score attached
         """
         for result in results:
+            # Get semantic similarity
             semantic_score = result.get("similarity", 0.0)
+            
+            # Calculate strategy match score
             strategy_score = self._calculate_strategy_score(result, routing)
             
             # Base score: 50% semantic + 50% strategy
-            final_score = (semantic_score * 0.5) + (strategy_score * 0.5)
+            base_score = (semantic_score * 0.5) + (strategy_score * 0.5)
             
             # Apply sentiment signal boost
             metadata = result["metadata"]
             signal_strength = float(metadata.get("sentiment_signal_strength", 0.0))
-            sentiment_boost = 1.0 + (signal_strength / 200.0)  # Max 1.5x boost
-            
-            final_score *= sentiment_boost
+            final_score = self._apply_sentiment_boost(base_score, signal_strength)
             
             # Apply cross-impact boost if present
             cross_impact_boost = result.get("cross_impact_boost", 1.0)
@@ -505,10 +535,14 @@ class LLMQueryProcessor:
             # Cap at 1.0
             result["final_score"] = min(final_score, 1.0)
             result["strategy_score"] = strategy_score
-            result["sentiment_boost"] = sentiment_boost
+            result["sentiment_boost"] = 1.0 + (signal_strength / 200.0)
         
         # Sort by final score (descending)
         return sorted(results, key=lambda x: x["final_score"], reverse=True)
+    
+    # ============================================================================
+    # End Task 4
+    # ============================================================================
     
     def _results_to_articles(
         self,
@@ -516,12 +550,6 @@ class LLMQueryProcessor:
     ) -> List[NewsArticle]:
         """
         Convert search results to NewsArticle objects with parsed metadata.
-        
-        Args:
-            results: Reranked search results
-            
-        Returns:
-            List of NewsArticle objects
         """
         articles = []
         
@@ -609,8 +637,8 @@ class LLMQueryProcessor:
         # Step 2: Execute strategy-specific search
         results = self._execute_strategy(routing, top_k * 2)  # Retrieve extra for reranking
         
-        # Step 3: Rerank results
-        ranked_results = self._rerank_results(results, routing)
+        # Step 3: Rerank results using Task 4 logic
+        ranked_results = self._rerank_by_relevance(results, routing)
         
         # Step 4: Apply minimum similarity threshold
         min_similarity = self.config.query_processing.min_similarity
