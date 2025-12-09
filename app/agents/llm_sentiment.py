@@ -34,8 +34,6 @@ class LLMSentimentAnalyzer:
         self.use_entity_context = use_entity_context
         
         print(f"✓ LLMSentimentAnalyzer initialized")
-        print(f"  - Model: {self.llm_client.model}")
-        print(f"  - Entity context: {'enabled' if use_entity_context else 'disabled'}")
     
     def _build_few_shot_examples(self) -> str:
         return self.config.prompts.sentiment_analysis.get('few_shot_examples', '')

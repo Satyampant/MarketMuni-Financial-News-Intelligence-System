@@ -24,7 +24,7 @@ class SentimentData:
     confidence_score: float  # 0-100 scale
     signal_strength: float  # 0-100 scale
     sentiment_breakdown: Dict[str, Any]
-    analysis_method: str  # "rule_based" | "ml_classifier" | "hybrid"
+    analysis_method: str  = "llm"
     timestamp: Optional[str] = None
     
     def __post_init__(self):
