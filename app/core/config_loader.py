@@ -52,6 +52,16 @@ class PromptConfig:
     query_routing: QueryRoutingPrompts = field(default_factory=dict)
 
 @dataclass
+class MongoDBConfig:
+    """MongoDB configuration for article storage."""
+    connection_string: str = "mongodb://localhost:27017/"
+    database_name: str = "marketmuni"
+    collection_name: str = "articles"
+    max_pool_size: int = 100
+    timeout_ms: int = 5000
+    max_filter_ids: int = 1000  # Threshold for broad filter optimization
+
+@dataclass
 class RedisConfig:
     """Redis cache configuration."""
     enabled: bool = True
@@ -70,6 +80,11 @@ class DeduplicationConfig:
     cross_encoder_threshold: float = 0.70
     cross_encoder_model: str = "cross-encoder/stsb-distilroberta-base"
 
+@dataclass
+class EntityExtractionConfig:
+    spacy_model: str = "en_core_web_sm"
+    use_spacy: bool = True
+    event_keywords: list = field(default_factory=list)
 
 @dataclass
 class VectorStoreConfig:
@@ -77,7 +92,6 @@ class VectorStoreConfig:
     persist_directory: str = "data/chroma_db"
     embedding_model: str = "all-mpnet-base-v2"
     distance_metric: str = "cosine"
-
 
 @dataclass
 class LLMRoutingConfig:
@@ -88,24 +102,20 @@ class LLMRoutingConfig:
     max_entities_per_query: int = 10
     enable_query_expansion: bool = True
 
-
 @dataclass
 class MultiQueryConfig:
     max_context_queries: int = 3
     initial_retrieval_multiplier: int = 2
-
 
 @dataclass
 class RerankingWeights:
     strategy_weight: float = 0.5
     semantic_weight: float = 0.5
 
-
 @dataclass
 class SentimentBoostConfig:
     enabled: bool = True
     max_multiplier: float = 1.5
-
 
 @dataclass
 class QueryProcessingConfig:
@@ -117,12 +127,10 @@ class QueryProcessingConfig:
     reranking_weights: Dict[str, RerankingWeights] = field(default_factory=dict)
     sentiment_boost: SentimentBoostConfig = field(default_factory=SentimentBoostConfig)
 
-
 @dataclass
 class StockImpactConfig:
     confidence_thresholds: Dict[str, float] = field(default_factory=dict)
     fuzzy_match_threshold: float = 0.80
-
 
 @dataclass
 class SupplyChainConfig:
@@ -130,14 +138,12 @@ class SupplyChainConfig:
     min_impact_score: float = 25.0
     weight_decay: float = 0.8
 
-
 @dataclass
 class LLMModelsConfig:
     """Alternative models for specific tasks."""
     fast: str = "llama-3.1-8b-instant"
     reasoning: str = "llama-3.3-70b-versatile"
     structured: str = "llama-3.3-70b-versatile"
-
 
 @dataclass
 class LLMFeaturesConfig:
@@ -147,7 +153,6 @@ class LLMFeaturesConfig:
     sentiment_analysis: bool = True
     supply_chain: bool = True
     query_expansion: bool = True
-
 
 @dataclass
 class LLMConfig:
@@ -161,7 +166,6 @@ class LLMConfig:
     models: LLMModelsConfig = field(default_factory=LLMModelsConfig)
     features: LLMFeaturesConfig = field(default_factory=LLMFeaturesConfig)
 
-
 @dataclass
 class APIConfig:
     host: str = "0.0.0.0"
@@ -171,7 +175,6 @@ class APIConfig:
     description: str = "Multi-agent AI system for processing and querying financial news"
     version: str = "1.0.0"
 
-
 @dataclass
 class ResourcesConfig:
     company_aliases: str = "company_aliases.json"
@@ -180,19 +183,16 @@ class ResourcesConfig:
     regulator_impact: str = "regulator_sector_impact.json"
     supply_chain_graph: str = "supply_chain_graph.json"
 
-
 @dataclass
 class LoggingConfig:
     level: str = "INFO"
     format: str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-
 
 @dataclass
 class PerformanceConfig:
     cache_embeddings: bool = True
     batch_size: int = 32
     num_workers: int = 4
-
 
 @dataclass
 class DevelopmentConfig:
@@ -201,10 +201,10 @@ class DevelopmentConfig:
     mock_data_path: str = "mock_news_data.json"
     enable_profiling: bool = False
 
-
 @dataclass
 class Config:
     """Main configuration class containing all settings."""
+    mongodb: MongoDBConfig = field(default_factory=MongoDBConfig)
     deduplication: DeduplicationConfig = field(default_factory=DeduplicationConfig)
     entity_extraction: EntityExtractionConfig = field(default_factory=EntityExtractionConfig)
     vector_store: VectorStoreConfig = field(default_factory=VectorStoreConfig)
@@ -232,6 +232,18 @@ def load_config(config_path: Optional[Path] = None) -> Config:
         
         config = Config()
         
+        # --- MongoDB Configuration ---
+        if 'mongodb' in yaml_data:
+            mongo = yaml_data['mongodb']
+            config.mongodb = MongoDBConfig(
+                connection_string=mongo.get('connection_string', 'mongodb://localhost:27017/'),
+                database_name=mongo.get('database_name', 'marketmuni'),
+                collection_name=mongo.get('collection_name', 'articles'),
+                max_pool_size=mongo.get('max_pool_size', 100),
+                timeout_ms=mongo.get('timeout_ms', 5000),
+                max_filter_ids=mongo.get('max_filter_ids', 1000)
+            )
+        
         # --- Deduplication ---
         dedup = yaml_data['deduplication']
         config.deduplication = DeduplicationConfig(
@@ -247,9 +259,6 @@ def load_config(config_path: Optional[Path] = None) -> Config:
             use_spacy=entity.get('use_spacy', True),
             event_keywords=entity.get('event_keywords', [])
         )
-        
-        # --- Sentiment Analysis ---
-        sentiment = yaml_data['sentiment_analysis']
         
         # --- Vector Store ---
         vs = yaml_data['vector_store']
@@ -415,12 +424,10 @@ def load_config(config_path: Optional[Path] = None) -> Config:
     except Exception as e:
         print(f"⚠ Error loading config file: {e}")
         print("  Using default configuration values")
-        return Config()
-
-
+        config = Config()
 
     # Load Prompts
-    prompts_config = PromptsConfig()
+    prompts_config = PromptConfig()
     try:
         with open(PROMPTS_FILE, 'r') as f:
             prompts_data = yaml.safe_load(f) or {}
@@ -439,27 +446,25 @@ def load_config(config_path: Optional[Path] = None) -> Config:
             few_shot_examples=p.get('few_shot_examples', '')
         )
 
-        p = prompts_data['stock_mapping']
-        prompts_config.stock_mapping = StockMappingPrompts(
+        p = prompts_data['stock_impact']
+        prompts_config.stock_impact = StockMappingPrompts(
             system_message=p.get('system_message', ''),
             task_prompt=p.get('task_prompt', '')
         )
 
         p = prompts_data['supply_chain']
-        prompts_config.stock_mapping = SupplyChainPrompts(
+        prompts_config.supply_chain = SupplyChainPrompts(
             system_message=p.get('system_message', ''),
             task_prompt=p.get('task_prompt', ''),
             few_shot_examples=p.get('few_shot_examples', '')
         )
 
         p = prompts_data['query_routing']
-        prompts_config.stock_mapping = QueryRoutingPrompts(
+        prompts_config.query_routing = QueryRoutingPrompts(
             system_message=p.get('system_message', ''),
             task_prompt=p.get('task_prompt', ''),
             few_shot_examples=p.get('few_shot_examples', '')
         )
-
-
             
         print(f"✓ Prompts loaded from {PROMPTS_FILE}")
     except Exception as e:

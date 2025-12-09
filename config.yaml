@@ -1,6 +1,17 @@
 # MarketMuni Configuration - Financial News Intelligence System
 
 # ----------------------------------------------------------------------------
+# MONGODB CONFIGURATION
+# ----------------------------------------------------------------------------
+mongodb:
+  connection_string: "mongodb://localhost:27017/"
+  database_name: "marketmuni"
+  collection_name: "articles"
+  max_pool_size: 100
+  timeout_ms: 5000
+  max_filter_ids: 1000  # Threshold for broad filter optimization (Task 12)
+
+# ----------------------------------------------------------------------------
 # REDIS CACHE
 # ----------------------------------------------------------------------------
 redis:
