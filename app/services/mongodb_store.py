@@ -332,10 +332,7 @@ class MongoDBStore:
             raise
     
     def article_count(self) -> int:
-        """
-        Get total number of articles in the collection.
-        Replaces NewsStorage.article_count().
-        """
+        """Get total number of articles in the collection."""
         return self.count_articles()
 
     # ========================================================================
