@@ -6,6 +6,7 @@ Adds MongoDB document conversion methods (Task 3)
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
 from typing import Optional, List, Dict, Any
+from app.core.llm_schemas import QueryIntent
 
 @dataclass
 class StockImpact:
