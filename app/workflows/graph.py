@@ -1,7 +1,3 @@
-"""
-Updated app/workflows/graph.py - Task 5: Integrate LLM Query Processor
-FIXED: Eliminates double LLM routing calls by using routing result from processor.
-"""
 
 from typing import TypedDict, List, Annotated, Optional, Dict, Any, Tuple
 import operator
@@ -10,15 +6,15 @@ from datetime import datetime
 from langgraph.graph import StateGraph, START, END
 
 from app.core.models import NewsArticle
-from app.services.storage import NewsStorage
+from app.services.mongodb_store import MongoDBStore
 from app.agents.deduplication import DeduplicationAgent
 from app.agents.llm_entity_extractor import LLMEntityExtractor
 from app.agents.llm_stock_mapper import LLMStockImpactMapper
 from app.agents.llm_sentiment import LLMSentimentAnalyzer
 from app.agents.llm_supply_chain import LLMSupplyChainAnalyzer
 from app.services.vector_store import VectorStore
-from app.agents.llm_query_router import LLMQueryRouter
-from app.agents.llm_query_processor import LLMQueryProcessor
+from app.agents.query_router import QueryRouter
+from app.agents.query_processor import TwoStepQueryProcessor
 from app.core.config_loader import get_config
 from app.core.llm_schemas import EntityExtractionSchema, SentimentAnalysisSchema
 
@@ -45,12 +41,12 @@ class NewsIntelligenceState(TypedDict):
 class NewsIntelligenceGraph:
     """
     LangGraph-based multi-agent pipeline for financial news intelligence.
-    Fully LLM-powered approach for all agents including query processing.
+    Integrated with MongoDB for article storage and retrieval.
     """
     
     def __init__(
         self,
-        storage: NewsStorage,
+        mongodb_store: MongoDBStore,
         vector_store: VectorStore,
         dedup_agent: Optional[DeduplicationAgent] = None,
         entity_extractor: Optional[LLMEntityExtractor] = None,
@@ -60,7 +56,8 @@ class NewsIntelligenceGraph:
     ):
         config = get_config()
 
-        self.storage = storage
+        # Replace storage with mongodb_store
+        self.mongodb_store = mongodb_store
         self.vector_store = vector_store
         
         self.dedup_agent = dedup_agent or DeduplicationAgent()
@@ -81,11 +78,11 @@ class NewsIntelligenceGraph:
         # LLM supply chain analyzer
         self.supply_chain_analyzer = supply_chain_analyzer or LLMSupplyChainAnalyzer()
         
-        # NEW: LLM Query Router (Task 2)
-        self.query_router = LLMQueryRouter()
+        # Initialize query router and processor
+        self.query_router = QueryRouter()
         
-        # NEW: LLM Query Processor (Task 3)
-        self.query_processor = LLMQueryProcessor(
+        self.query_processor = TwoStepQueryProcessor(
+            mongodb_store=self.mongodb_store,
             vector_store=self.vector_store,
             query_router=self.query_router,
             config=config
@@ -94,12 +91,9 @@ class NewsIntelligenceGraph:
         self.app = self._build_ingestion_graph()
         self.query_app = self._build_query_graph()
         
-        print("✓ NewsIntelligenceGraph initialized with full LLM pipeline")
-        print("  - Entity extraction: LLM")
-        print("  - Stock impact mapping: LLM")
-        print("  - Sentiment analysis: LLM")
-        print("  - Supply chain analysis: LLM")
-        print("  - Query processing: LLM-based routing and execution")
+        print("✓ NewsIntelligenceGraph initialized with MongoDB integration")
+        print("  - Storage: MongoDB")
+        print("  - Query processing: Two-step with broad filter optimization")
     
     def _build_ingestion_graph(self):
         """Construct the main news ingestion and analysis pipeline."""
@@ -136,8 +130,7 @@ class NewsIntelligenceGraph:
     
     def _ingestion_agent(self, state: NewsIntelligenceState) -> dict:
         """
-        Validates article and GENERATES EMBEDDING (single source of truth).
-        This embedding is passed through the entire pipeline.
+        Validates article and generates embedding (single source of truth).
         """
         article = state.get("current_article")
         
@@ -166,7 +159,7 @@ class NewsIntelligenceGraph:
         }
     
     def _deduplication_agent(self, state: NewsIntelligenceState) -> dict:
-        """Uses pre-computed embedding from state."""
+
         article = state["current_article"]
         article_embedding = state.get("article_embedding")
         
@@ -177,10 +170,12 @@ class NewsIntelligenceGraph:
             )
         
         try:
+            # Pass mongodb_store to deduplication
             duplicate_ids = self.dedup_agent.find_duplicates_with_vector_search(
                 article,
                 article_embedding,
-                self.vector_store
+                self.vector_store,
+                self.mongodb_store  
             )
         except Exception as e:
             print(f"⚠ Vector search failed: {e}")
@@ -189,11 +184,11 @@ class NewsIntelligenceGraph:
         stats = state.get("stats", {})
         stats["duplicates_found"] = len(duplicate_ids)
         stats["is_duplicate"] = len(duplicate_ids) > 0
-        stats["deduplication_method"] = "vector_search"
+        stats["deduplication_method"] = "vector_search_with_mongodb_hydration"
         
         if duplicate_ids:
-            duplicates = [self.storage.get_by_id(dup_id) for dup_id in duplicate_ids]
-            duplicates = [d for d in duplicates if d is not None]
+            # Fetch duplicates from MongoDB instead of in-memory storage
+            duplicates = self.mongodb_store.get_articles_by_ids(duplicate_ids)
             duplicates.append(article)
             
             consolidated = self.dedup_agent.consolidate_duplicates(duplicates)
@@ -426,12 +421,13 @@ class NewsIntelligenceGraph:
         }
     
     def _indexing_agent(self, state: NewsIntelligenceState) -> dict:
-        """Reuses pre-computed embedding for indexing."""
         article = state["current_article"]
         article_embedding = state.get("article_embedding")
         
-        self.storage.add_article(article)
+        # Insert into MongoDB
+        mongo_id = self.mongodb_store.insert_article(article)
         
+        # Index in ChromaDB
         if article_embedding:
             self.vector_store.index_article(article, embedding=article_embedding)
         else:
@@ -440,7 +436,9 @@ class NewsIntelligenceGraph:
         
         stats = state.get("stats", {})
         stats["indexed"] = True
-        stats["total_articles"] = self.storage.article_count()
+        stats["indexed_in_mongo"] = bool(mongo_id)
+        stats["indexed_in_chroma"] = True
+        stats["total_articles"] = self.mongodb_store.article_count()
         stats["vector_store_count"] = self.vector_store.count()
         stats["embedding_reused"] = article_embedding is not None
         
@@ -451,8 +449,7 @@ class NewsIntelligenceGraph:
     
     def _query_agent(self, state: NewsIntelligenceState) -> dict:
         """
-        FIXED: Retrieves relevant articles using LLM-based query routing and processing.
-        Single LLM call for routing - no redundant calls.
+        use TwoStepQueryProcessor with MongoDB integration.
         """
         query_text = state.get("query_text")
         sentiment_filter = state.get("sentiment_filter")
@@ -467,14 +464,17 @@ class NewsIntelligenceGraph:
             if sentiment_filter not in valid_sentiments:
                 return {"error": f"Invalid sentiment filter: {sentiment_filter}. Must be {valid_sentiments}"}
         
-        # FIXED: Call process_query_with_routing which returns both results AND routing
-        results, routing = self.query_processor.process_query_with_routing(
+        # Use TwoStepQueryProcessor which handles MongoDB filtering
+        results, routing = self.query_processor.process_query(
             query_text,
             top_k=config.query_processing.default_top_k,
             sentiment_filter=sentiment_filter
         )
         
-        # Build stats using the routing information from the same call
+        # Extract strategy metadata if available
+        strategy_metadata = getattr(routing, 'strategy_metadata', {})
+        
+        # Build stats using the routing information
         stats = {
             "query_time": datetime.now().isoformat(),
             "results_count": len(results),
@@ -489,7 +489,12 @@ class NewsIntelligenceGraph:
                 "refined_query": routing.refined_query,
                 "routing_confidence": routing.confidence,
                 "routing_reasoning": routing.reasoning
-            }
+            },
+            "execution_strategy": strategy_metadata.get("strategy_used", "unknown"),
+            "mongodb_filter_applied": strategy_metadata.get("mongodb_filter_applied", False),
+            "filtered_count": strategy_metadata.get("filtered_count", 0),
+            "vector_candidates": strategy_metadata.get("vector_candidates", 0),
+            "threshold": strategy_metadata.get("threshold", 0)
         }
         
         return {
@@ -541,26 +546,30 @@ class NewsIntelligenceGraph:
         return self.query_app.invoke(initial_state)
     
     def get_stats(self) -> dict:
-        """Returns system statistics including storage counts and analysis metadata."""
-        total_articles = self.storage.article_count()
+        total_articles = self.mongodb_store.article_count()
         vector_count = self.vector_store.count()
         
-        sentiment_stats = self.vector_store.get_sentiment_statistics()
+        # Get articles from MongoDB for statistics
+        articles = self.mongodb_store.get_all_articles()
         
+        # Entity extraction stats
         entity_stats = self.entity_extractor.get_cache_stats()
         
-        articles = self.storage.get_all_articles()
+        # Stock impact stats
         stock_impact_stats = self.stock_mapper.get_impact_statistics(articles)
         
+        # Sentiment stats from analyzer
         sentiment_analyzer_stats = self.sentiment_analyzer.get_sentiment_statistics(articles)
         
+        # Supply chain stats
         supply_chain_stats = self.supply_chain_analyzer.get_impact_statistics(articles)
         
         return {
             "total_articles_stored": total_articles,
             "vector_store_count": vector_count,
+            "storage_backend": "mongodb",
             "dedup_threshold": {
-                "bi_encoder": self.dedup_agent.bi_threshold,
+                "bi_encoder": self.dedup_agent.min_similarity,
                 "cross_encoder": self.dedup_agent.cross_threshold
             },
             "entity_extraction": {
@@ -573,7 +582,6 @@ class NewsIntelligenceGraph:
             },
             "sentiment_analysis": {
                 "method": "llm",
-                "vector_store_stats": sentiment_stats,
                 "analyzer_stats": sentiment_analyzer_stats
             },
             "supply_chain_analysis": {
@@ -581,9 +589,10 @@ class NewsIntelligenceGraph:
                 "statistics": supply_chain_stats
             },
             "query_processing": {
-                "method": "llm_routing",
-                "router": "LLMQueryRouter",
-                "processor": "LLMQueryProcessor"
+                "method": "two_step_mongodb",
+                "router": "QueryRouter",
+                "processor": "TwoStepQueryProcessor",
+                "max_filter_ids": self.query_processor.max_filter_ids
             },
             "status": "operational"
         }
