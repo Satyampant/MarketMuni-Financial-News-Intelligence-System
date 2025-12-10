@@ -1,6 +1,5 @@
 """
-File: app/agents/deduplication.py
-Fixed Deduplication Agent - VectorStore as single source of truth for embeddings.
+Deduplication Agent with MongoDB Hydration 
 """
 
 from typing import List, Optional, Tuple
@@ -10,37 +9,45 @@ from sentence_transformers import CrossEncoder
 from app.core.models import NewsArticle
 from app.core.config_loader import get_config
 
+if TYPE_CHECKING:
+    from app.services.vector_store import VectorStore
+    from app.services.mongodb_store import MongoDBStore
 
 class DeduplicationAgent:
     """
     Two-stage semantic deduplication pipeline:
-    1. Vector Search (ChromaDB): Fast candidate retrieval.
-    2. Cross-Encoder: High-precision verification on top-K candidates.
+    1. Vector Search (ChromaDB): Fast candidate retrieval (IDs only).
+    2. MongoDB Hydration: Fetch full article text.
+    3. Cross-Encoder: High-precision verification on hydrated candidates.
     """
     
-    def __init__(self, cross_encoder_threshold: float = None,candidate_pool_size: int = 10):
+    def __init__(self, cross_encoder_threshold: float = None, candidate_pool_size: int = 10):
         config = get_config()
         
         self.cross_threshold = cross_encoder_threshold or config.deduplication.cross_encoder_threshold
+        self.min_similarity = config.deduplication.bi_encoder_threshold
         self.candidate_pool_size = candidate_pool_size
         
-        # Only initialize cross-encoder; embeddings are delegated to VectorStore
         self.cross_encoder = CrossEncoder(config.deduplication.cross_encoder_model)
         
-        print(f"✓ DeduplicationAgent initialized (Vector Search Optimized)")
+        print(f"✓ DeduplicationAgent initialized (MongoDB Hydration)")
     
     def _prepare_text(self, article: NewsArticle) -> str:
+        """Prepare article text for comparison."""
         return f"{article.title}. {article.content}"
     
-    def find_duplicates_with_vector_search(self,
+    def find_duplicates_with_vector_search(
+        self,
         article: NewsArticle,
         article_embedding: List[float],
-        vector_store: 'VectorStore'
+        vector_store: 'VectorStore',
+        mongodb_store: 'MongoDBStore'
     ) -> List[str]:
         """
-        Retrieves candidates via vector search, then verifies duplicates using a cross-encoder.
+        Retrieves candidates via vector search, hydrates from MongoDB, 
+        then verifies duplicates using cross-encoder.
         """
-        # Stage 1: Retrieve top-K candidates using Vector Search (ANN)
+        # Step 1: Retrieve candidate IDs from ChromaDB (vector search only)
         candidates = vector_store.search(
             query="",
             top_k=self.candidate_pool_size,
@@ -50,35 +57,35 @@ class DeduplicationAgent:
         if not candidates:
             return []
         
-        # Stage 2: Cross-Encoder Verification (Precision Check)
+        # Step 2: Extract candidate IDs and filter by similarity threshold
+        candidate_ids = [
+            c["article_id"] for c in candidates 
+            if c["article_id"] != article.id and c.get("similarity", 0.0) >= self.min_similarity
+        ]
+        
+        if not candidate_ids:
+            return []
+        
+        # Step 3: Hydrate candidates from MongoDB (fetch full text)
+        candidate_articles = mongodb_store.get_articles_by_ids(candidate_ids)
+        
+        if not candidate_articles:
+            return []
+        
+        # Step 4: Run Cross-Encoder verification
         article_text = self._prepare_text(article)
-        
         pairs = []
-        candidate_ids = []
+        candidate_id_map = {}
         
-        config = get_config()
-        min_similarity = config.deduplication.bi_encoder_threshold
-
-        for candidate in candidates:
-            candidate_id = candidate["metadata"]["article_id"]
-            
-            # Skip self-match
-            if candidate_id == article.id:
-                continue
-            
-            # Filter candidates below vector search similarity threshold
-            similarity = candidate.get("similarity", 0.0)
-            if similarity < min_similarity:
-                continue
-                
-            candidate_text = candidate["document"]
+        for idx, candidate_article in enumerate(candidate_articles):
+            candidate_text = self._prepare_text(candidate_article)
             pairs.append([article_text, candidate_text])
-            candidate_ids.append(candidate_id)
+            candidate_id_map[idx] = candidate_article.id
         
         if not pairs:
             return []
         
-        # Run cross-encoder on selected candidate pairs
+        # Run cross-encoder on hydrated candidate pairs
         cross_scores = self.cross_encoder.predict(
             pairs,
             show_progress_bar=False,
@@ -87,8 +94,8 @@ class DeduplicationAgent:
         
         # Filter by cross-encoder threshold
         duplicate_ids = [
-            candidate_ids[idx] 
-            for idx, score in enumerate(cross_scores) 
+            candidate_id_map[idx]
+            for idx, score in enumerate(cross_scores)
             if score >= self.cross_threshold
         ]
         
@@ -137,15 +144,19 @@ class DeduplicationAgent:
 def find_duplicates_batch(
     articles_with_embeddings: List[Tuple[NewsArticle, List[float]]],
     vector_store: 'VectorStore',
+    mongodb_store: 'MongoDBStore',
     dedup_agent: DeduplicationAgent
 ) -> dict:
-    """Batch processes multiple articles for duplicate detection."""
+    """
+    Batch processes multiple articles for duplicate detection.
+    """
     results = {}
     for article, embedding in articles_with_embeddings:
         duplicates = dedup_agent.find_duplicates_with_vector_search(
             article, 
             embedding,
-            vector_store
+            vector_store,
+            mongodb_store
         )
         results[article.id] = duplicates
     return results
