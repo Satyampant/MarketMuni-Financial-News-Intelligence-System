@@ -2,6 +2,7 @@
 File: app/services/mongodb_store.py
 MongoDB Service Layer with connection management, retry logic, and CRUD operations.
 Implements Task 4: MongoDB Insert Operations
+Implements Task 5: MongoDB Retrieval Operations
 """
 
 import logging
@@ -12,6 +13,7 @@ from pymongo.database import Database
 from pymongo.collection import Collection
 from pymongo.errors import ConnectionFailure, ServerSelectionTimeoutError, BulkWriteError
 from pymongo.results import UpdateResult, InsertManyResult
+from pymongo import ReplaceOne
 
 from app.core.models import NewsArticle
 
@@ -125,10 +127,6 @@ class MongoDBStore:
             
         Returns:
             Article ID (business key) as string
-            
-        Raises:
-            ConnectionError: If not connected to MongoDB
-            Exception: For other database errors
         """
         if not self.is_connected or not self.collection:
             raise ConnectionError("Not connected to MongoDB")
@@ -157,9 +155,6 @@ class MongoDBStore:
             
         Returns:
             List of article IDs (business keys) for successfully processed articles
-            
-        Raises:
-            ConnectionError: If not connected to MongoDB
         """
         if not self.is_connected or not self.collection:
             raise ConnectionError("Not connected to MongoDB")
@@ -170,9 +165,9 @@ class MongoDBStore:
         # Prepare bulk operations: Replace document if ID exists, Insert if not.
         operations = [
             ReplaceOne(
-                filter={"id": article.id},           # Match by business ID
+                filter={"id": article.id},
                 replacement=article.to_mongo_document(),
-                upsert=True                          # Update if exists, Insert if new
+                upsert=True
             )
             for article in articles
         ]
@@ -209,6 +204,102 @@ class MongoDBStore:
             
         except Exception as e:
             logger.error(f"Unexpected error during bulk insert: {str(e)}")
+            raise
+
+    # ========================================================================
+    # TASK 5: MONGODB RETRIEVAL OPERATIONS
+    # ========================================================================
+    
+    def get_article_by_id(self, article_id: str) -> Optional[NewsArticle]:
+        """Retrieve a single article by its business ID."""
+        if not self.is_connected or not self.collection:
+            raise ConnectionError("Not connected to MongoDB")
+        
+        try:
+            doc = self.collection.find_one({"id": article_id})
+            
+            if doc is None:
+                return None
+            
+            # Convert MongoDB document back to NewsArticle
+            return NewsArticle.from_mongo_document(doc)
+            
+        except Exception as e:
+            logger.error(f"Error retrieving article {article_id}: {str(e)}")
+            raise
+    
+    def get_articles_by_ids(self, article_ids: List[str]) -> List[NewsArticle]:
+        """
+        Returns: List of NewsArticle objects in the same order as input IDs
+            (skips IDs that don't exist in database)
+        """
+        if not self.is_connected or not self.collection:
+            raise ConnectionError("Not connected to MongoDB")
+        
+        if not article_ids:
+            return []
+        
+        try:
+            # Query MongoDB for all matching IDs
+            cursor = self.collection.find({"id": {"$in": article_ids}})
+            
+            # Create ID -> Article mapping for efficient lookup
+            article_dict = {
+                doc["id"]: NewsArticle.from_mongo_document(doc)
+                for doc in cursor
+            }
+            
+            # Preserve original order by mapping IDs back to articles
+            # Skip IDs that weren't found in the database
+            articles = [
+                article_dict[article_id] 
+                for article_id in article_ids 
+                if article_id in article_dict
+            ]
+            
+            return articles
+            
+        except Exception as e:
+            logger.error(f"Error retrieving articles by IDs: {str(e)}")
+            raise
+    
+    def get_all_articles(self) -> List[NewsArticle]:
+        """Retrieve all articles from the collection."""
+        if not self.is_connected or not self.collection:
+            raise ConnectionError("Not connected to MongoDB")
+        
+        try:
+            cursor = self.collection.find({})
+            
+            articles = [
+                NewsArticle.from_mongo_document(doc)
+                for doc in cursor
+            ]
+            
+            return articles
+            
+        except Exception as e:
+            logger.error(f"Error retrieving all articles: {str(e)}")
+            raise
+    
+    def get_articles_with_sentiment(self) -> List[NewsArticle]:
+        """Retrieve all articles that have sentiment analysis data."""
+        if not self.is_connected or not self.collection:
+            raise ConnectionError("Not connected to MongoDB")
+        
+        try:
+            # Query for documents where sentiment field exists and is not None
+            cursor = self.collection.find({"sentiment": {"$ne": None}})
+            
+            articles = [
+                NewsArticle.from_mongo_document(doc)
+                for doc in cursor
+            ]
+            
+            return articles
+            
+        except Exception as e:
+            logger.error(f"Error retrieving articles with sentiment: {str(e)}")
             raise
 
     # ========================================================================
