@@ -488,9 +488,27 @@ def _explain_where_clause(routing: QueryRouterSchema) -> str:
 
 @router.get("/stats", response_model=StatsResponse, tags=["Statistics"])
 async def get_stats():
+    """
+    Retrieve system statistics from MongoDB and Vector Store.
+    """
     try:
-        stats = news_graph.get_stats()
-        return StatsResponse(**stats)
+        # Fetch stats directly from MongoDB and Vector Store
+        mongo_article_count = mongodb_store.article_count()
+        sentiment_stats = mongodb_store.get_sentiment_statistics()
+        supply_chain_stats = mongodb_store.get_supply_chain_statistics()
+        vector_count = vector_store.count()
+        
+        # Construct response matching StatsResponse schema
+        stats_data = {
+            "total_articles": mongo_article_count,
+            "mongodb_stats": {
+                "sentiment_distribution": sentiment_stats,
+                "supply_chain_stats": supply_chain_stats
+            },
+            "vector_store_count": vector_count
+        }
+        
+        return StatsResponse(**stats_data)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Stats error: {str(e)}")
 
