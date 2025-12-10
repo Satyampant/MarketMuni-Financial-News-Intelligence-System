@@ -1,7 +1,3 @@
-"""
-- Store only article_id in metadata
-"""
-
 import chromadb
 from chromadb.config import Settings
 from sentence_transformers import SentenceTransformer
@@ -10,9 +6,11 @@ from pathlib import Path
 from app.core.models import NewsArticle
 from app.core.config_loader import get_config
 
-
 class VectorStore:
-    """All metadata and document text now stored in MongoDB.Pure vector index for semantic search. """
+    """
+    Pure vector index for semantic search. 
+    All rich metadata and document text are now stored in MongoDB.
+    """
     
     def __init__(
         self,
@@ -28,7 +26,7 @@ class VectorStore:
         embedding_model = embedding_model or config.vector_store.embedding_model
         
         self.persist_directory = Path(persist_dir)
-        self.persist_directory.mkdir(exist_ok=True)
+        self.persist_directory.mkdir(exist_ok=True, parents=True)
         
         self.client = chromadb.PersistentClient(path=str(self.persist_directory))
         
@@ -58,7 +56,7 @@ class VectorStore:
     ) -> None:
         """
         Index article with MINIMAL metadata (article_id only).
-        Store empty string as document (ChromaDB requirement).
+        Stores empty string as document (ChromaDB requirement).
         """
         if embedding is None:
             text = f"{article.title}. {article.content}"
@@ -84,15 +82,7 @@ class VectorStore:
     ) -> List[Dict[str, Any]]:
         """
         Search within a filtered set of article IDs.
-        Used for MongoDB filter → Vector search strategy.
-        
-        Args:
-            query_embedding: Query vector
-            article_ids: List of article IDs to search within
-            top_k: Number of results to return
-            
-        Returns:
-            List of dicts with article_id, similarity, distance
+        Used for MongoDB filter -> Vector search strategy.
         """
         if not article_ids:
             return []
@@ -109,16 +99,7 @@ class VectorStore:
             include=["metadatas", "distances"]
         )
         
-        # Format results with minimal data
-        formatted_results = []
-        for i in range(len(results["ids"][0])):
-            formatted_results.append({
-                "article_id": results["ids"][0][i],
-                "similarity": 1 - results["distances"][0][i],
-                "distance": results["distances"][0][i]
-            })
-        
-        return formatted_results
+        return self._format_results(results)
     
     def search(
         self,
@@ -129,8 +110,7 @@ class VectorStore:
     ) -> List[Dict[str, Any]]:
         """
         Perform vector search with optional article_id filtering.
-        Returns:
-            List of dicts with article_id, similarity, distance
+        Returns minimal result format: article_id, similarity, distance.
         """
         if query_embedding is None and query:
             query_embedding = self.create_embedding(query)
@@ -149,21 +129,26 @@ class VectorStore:
             include=["metadatas", "distances"]
         )
         
-        # Format results with minimal data
+        return self._format_results(results)
+
+    def _format_results(self, results: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Helper to format ChromaDB results to minimal structure."""
         formatted_results = []
+        if not results["ids"]:
+            return formatted_results
+            
         for i in range(len(results["ids"][0])):
             formatted_results.append({
                 "article_id": results["ids"][0][i],
                 "similarity": 1 - results["distances"][0][i],
                 "distance": results["distances"][0][i]
             })
-        
         return formatted_results
     
     def get_all_ids(self) -> List[str]:
         """
         Get all article IDs in the vector store.
-        Used for inverted search strategy (Vector search → MongoDB validation).
+        Used for inverted search strategy (Vector search -> MongoDB validation).
         """
         results = self.collection.get(
             include=[],  # Don't include any data, just IDs
