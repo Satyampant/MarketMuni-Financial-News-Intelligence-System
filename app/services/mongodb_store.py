@@ -1,13 +1,11 @@
 """
 File: app/services/mongodb_store.py
-MongoDB Service Layer with connection management, retry logic, and CRUD operations.
-Implements Task 4: MongoDB Insert Operations
-Implements Task 5: MongoDB Retrieval Operations
+MongoDB Service Layer with Task 6: Metadata Query Operations
 """
 
 import logging
 import time
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from pymongo import MongoClient
 from pymongo.database import Database
 from pymongo.collection import Collection
@@ -17,7 +15,6 @@ from pymongo import ReplaceOne
 
 from app.core.models import NewsArticle
 
-# Configure logger
 logger = logging.getLogger(__name__)
 
 class MongoDBStore:
@@ -47,13 +44,10 @@ class MongoDBStore:
         self.collection: Optional[Collection] = None
         self.is_connected: bool = False
         
-        # Attempt initial connection
         self.connect()
     
     def connect(self) -> bool:
-        """
-        Establish MongoDB connection with retry logic.
-        """
+        """Establish MongoDB connection with retry logic."""
         for attempt in range(1, self.max_retries + 1):
             try:
                 self.client = MongoClient(
@@ -64,7 +58,6 @@ class MongoDBStore:
                     socketTimeoutMS=self.timeout_ms * 2
                 )
                 
-                # 'ping' to verify connection is actually alive
                 self.client.admin.command('ping')
                 
                 self.db = self.client[self.database_name]
@@ -78,7 +71,7 @@ class MongoDBStore:
                 logger.warning(f"MongoDB connection attempt {attempt}/{self.max_retries} failed: {str(e)}")
                 self.is_connected = False
                 if attempt < self.max_retries:
-                    time.sleep(2 ** attempt)  # Exponential backoff
+                    time.sleep(2 ** attempt)
             except Exception as e:
                 logger.error(f"Unexpected error during MongoDB connection: {str(e)}")
                 self.is_connected = False
@@ -119,50 +112,28 @@ class MongoDBStore:
     # ========================================================================
     
     def insert_article(self, article: NewsArticle) -> str:
-        """
-        Insert or update article in MongoDB using upsert to handle duplicates.
-        
-        Args:
-            article: NewsArticle object to insert
-            
-        Returns:
-            Article ID (business key) as string
-        """
+        """Insert or update article in MongoDB using upsert."""
         if not self.is_connected or not self.collection:
             raise ConnectionError("Not connected to MongoDB")
         
-        # Convert article to MongoDB document format
         mongo_doc = article.to_mongo_document()
         
-        # Use upsert with article.id as unique key to handle duplicates
         result: UpdateResult = self.collection.replace_one(
             {"id": article.id},
             mongo_doc,
             upsert=True
         )
         
-        # Return the business key (article.id) which is known and avoids extra read
-        # MongoDB _id is only for internal use
         return article.id
     
     def bulk_insert_articles(self, articles: List[NewsArticle]) -> List[str]:
-        """
-        Batch insert or update multiple articles using bulk write operations.
-        Uses ReplaceOne with upsert=True to handle duplicates gracefully.
-        
-        Args:
-            articles: List of NewsArticle objects to insert/update
-            
-        Returns:
-            List of article IDs (business keys) for successfully processed articles
-        """
+        """Batch insert or update multiple articles using bulk write operations."""
         if not self.is_connected or not self.collection:
             raise ConnectionError("Not connected to MongoDB")
         
         if not articles:
             return []
         
-        # Prepare bulk operations: Replace document if ID exists, Insert if not.
         operations = [
             ReplaceOne(
                 filter={"id": article.id},
@@ -173,7 +144,6 @@ class MongoDBStore:
         ]
         
         try:
-            # ordered=False allows parallel processing and doesn't stop on a single failure
             result = self.collection.bulk_write(operations, ordered=False)
             
             logger.info(
@@ -182,19 +152,14 @@ class MongoDBStore:
                 f"{result.matched_count} matched."
             )
             
-            # Since we used upsert, we can assume all valid articles in the list 
-            # are now present in the database.
             return [article.id for article in articles]
             
         except BulkWriteError as e:
-            # Handle partial failures (e.g., validation errors, network glitches)
             logger.error(f"Bulk write error details: {e.details}")
             
-            # Extract IDs that failed to write
             write_errors = e.details.get('writeErrors', [])
             failed_indices = {error['index'] for error in write_errors}
             
-            # Return only the IDs that didn't fail
             successful_ids = [
                 articles[i].id 
                 for i in range(len(articles)) 
@@ -221,7 +186,6 @@ class MongoDBStore:
             if doc is None:
                 return None
             
-            # Convert MongoDB document back to NewsArticle
             return NewsArticle.from_mongo_document(doc)
             
         except Exception as e:
@@ -229,10 +193,7 @@ class MongoDBStore:
             raise
     
     def get_articles_by_ids(self, article_ids: List[str]) -> List[NewsArticle]:
-        """
-        Returns: List of NewsArticle objects in the same order as input IDs
-            (skips IDs that don't exist in database)
-        """
+        """Retrieve multiple articles by IDs, preserving order."""
         if not self.is_connected or not self.collection:
             raise ConnectionError("Not connected to MongoDB")
         
@@ -240,17 +201,13 @@ class MongoDBStore:
             return []
         
         try:
-            # Query MongoDB for all matching IDs
             cursor = self.collection.find({"id": {"$in": article_ids}})
             
-            # Create ID -> Article mapping for efficient lookup
             article_dict = {
                 doc["id"]: NewsArticle.from_mongo_document(doc)
                 for doc in cursor
             }
             
-            # Preserve original order by mapping IDs back to articles
-            # Skip IDs that weren't found in the database
             articles = [
                 article_dict[article_id] 
                 for article_id in article_ids 
@@ -288,7 +245,6 @@ class MongoDBStore:
             raise ConnectionError("Not connected to MongoDB")
         
         try:
-            # Query for documents where sentiment field exists and is not None
             cursor = self.collection.find({"sentiment": {"$ne": None}})
             
             articles = [
@@ -301,6 +257,82 @@ class MongoDBStore:
         except Exception as e:
             logger.error(f"Error retrieving articles with sentiment: {str(e)}")
             raise
+
+    # ========================================================================
+    # TASK 6: MONGODB METADATA QUERY OPERATIONS
+    # ========================================================================
+    
+    def filter_by_metadata(
+        self, 
+        filters: Dict[str, Any], 
+        limit: Optional[int] = None
+    ) -> List[str]:
+        """Filter articles by metadata and return matching article IDs sorted by recency."""
+        if not self.is_connected or not self.collection:
+            raise ConnectionError("Not connected to MongoDB")
+        
+        try:
+            query = self.collection.find(
+                filters,
+                {"id": 1, "_id": 0}
+            ).sort("timestamp", -1)
+            
+            if limit is not None:
+                query = query.limit(limit)
+            
+            article_ids = [doc["id"] for doc in query]
+            
+            return article_ids
+            
+        except Exception as e:
+            logger.error(f"Error filtering by metadata: {str(e)}")
+            raise
+    
+    def filter_by_sectors(
+        self, 
+        sectors: List[str], 
+        limit: Optional[int] = None
+    ) -> List[str]:
+        """Filter articles by sectors and return matching article IDs."""
+        if not sectors:
+            return []
+            
+        mongo_filter = {"entities.Sectors": {"$in": sectors}}
+        
+        return self.filter_by_metadata(mongo_filter, limit)
+
+    def filter_by_sentiment(
+        self, 
+        classification: str, 
+        limit: Optional[int] = None
+    ) -> List[str]:
+        """Filter articles by sentiment classification and return matching article IDs."""
+        if not classification:
+            return []
+            
+        mongo_filter = {"sentiment.classification": classification}
+        
+        return self.filter_by_metadata(mongo_filter, limit)
+    
+    def count_articles(self, filters: Optional[Dict[str, Any]] = None) -> int:
+        """Count articles matching the specified filters."""
+        if not self.is_connected or not self.collection:
+            raise ConnectionError("Not connected to MongoDB")
+        
+        try:
+            count = self.collection.count_documents(filters or {})
+            return count
+            
+        except Exception as e:
+            logger.error(f"Error counting articles: {str(e)}")
+            raise
+    
+    def article_count(self) -> int:
+        """
+        Get total number of articles in the collection.
+        Replaces NewsStorage.article_count().
+        """
+        return self.count_articles()
 
     # ========================================================================
     # CONTEXT MANAGER SUPPORT
