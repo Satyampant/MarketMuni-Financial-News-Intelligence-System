@@ -15,7 +15,6 @@ from app.core.config_loader import get_config
 class QueryRouter:
     """
     LLM-based query router that generates MongoDB-compatible filters.
-    Replaces LLMQueryRouter with MongoDB filter generation capability.
     """
     
     def __init__(self, llm_client: Optional[GroqLLMClient] = None):

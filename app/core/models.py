@@ -51,6 +51,7 @@ class QueryRouting:
     reasoning: str
     regulators: List[str] = None
     temporal_scope: Optional[str] = None
+    strategy_metadata: Optional[Dict] = None
     
     def __post_init__(self):
         if self.regulators is None:
