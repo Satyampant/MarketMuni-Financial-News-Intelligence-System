@@ -1,15 +1,15 @@
 """
 File: app/services/mongodb_store.py
-MongoDB Service Layer with Task 6: Metadata Query Operations
+MongoDB Service Layer with Task 7: MongoDB Index Creation
 """
 
 import logging
 import time
 from typing import Optional, List, Dict, Any
-from pymongo import MongoClient
+from pymongo import MongoClient, ASCENDING, DESCENDING
 from pymongo.database import Database
 from pymongo.collection import Collection
-from pymongo.errors import ConnectionFailure, ServerSelectionTimeoutError, BulkWriteError
+from pymongo.errors import ConnectionFailure, ServerSelectionTimeoutError, BulkWriteError, OperationFailure
 from pymongo.results import UpdateResult, InsertManyResult
 from pymongo import ReplaceOne
 
@@ -45,6 +45,10 @@ class MongoDBStore:
         self.is_connected: bool = False
         
         self.connect()
+        
+        # Create indexes after successful connection
+        if self.is_connected:
+            self.create_indexes()
     
     def connect(self) -> bool:
         """Establish MongoDB connection with retry logic."""
@@ -333,6 +337,83 @@ class MongoDBStore:
         Replaces NewsStorage.article_count().
         """
         return self.count_articles()
+
+    # ========================================================================
+    # TASK 7: MONGODB INDEX CREATION
+    # ========================================================================
+    
+    def create_indexes(self) -> None:
+        """
+        Create indexes on frequently queried fields for optimal performance.
+        Called automatically during initialization.
+        """
+        if not self.is_connected or not self.collection:
+            logger.warning("Cannot create indexes - not connected to MongoDB")
+            return
+        
+        try:
+            # Index 1: Unique index on article ID (business key)
+            self.collection.create_index(
+                [("id", ASCENDING)],
+                unique=True,
+                name="idx_id"
+            )
+            logger.info("✓ Created unique index on 'id' field")
+            
+            # Index 2: Index on entities.Sectors for sector filtering
+            self.collection.create_index(
+                [("entities.Sectors", ASCENDING)],
+                name="idx_sectors"
+            )
+            logger.info("✓ Created index on 'entities.Sectors' field")
+            
+            # Index 3: Index on entities.Companies for company filtering
+            self.collection.create_index(
+                [("entities.Companies", ASCENDING)],
+                name="idx_companies"
+            )
+            logger.info("✓ Created index on 'entities.Companies' field")
+            
+            # Index 4: Index on impacted_stocks.symbol for stock filtering
+            self.collection.create_index(
+                [("impacted_stocks.symbol", ASCENDING)],
+                name="idx_stocks"
+            )
+            logger.info("✓ Created index on 'impacted_stocks.symbol' field")
+            
+            # Index 5: Index on sentiment.classification for sentiment filtering
+            self.collection.create_index(
+                [("sentiment.classification", ASCENDING)],
+                name="idx_sentiment"
+            )
+            logger.info("✓ Created index on 'sentiment.classification' field")
+            
+            # Index 6: Index on timestamp for recency sorting (descending for recent-first)
+            self.collection.create_index(
+                [("timestamp", DESCENDING)],
+                name="idx_timestamp"
+            )
+            logger.info("✓ Created index on 'timestamp' field")
+            
+            # Index 7: Compound index for combined sector + sentiment + timestamp queries
+            self.collection.create_index(
+                [
+                    ("entities.Sectors", ASCENDING),
+                    ("sentiment.classification", ASCENDING),
+                    ("timestamp", DESCENDING)
+                ],
+                name="idx_sector_sentiment_time"
+            )
+            logger.info("✓ Created compound index on 'entities.Sectors + sentiment.classification + timestamp'")
+            
+            logger.info("✓ All MongoDB indexes created successfully")
+            
+        except OperationFailure as e:
+            logger.error(f"Failed to create indexes: {str(e)}")
+            raise
+        except Exception as e:
+            logger.error(f"Unexpected error creating indexes: {str(e)}")
+            raise
 
     # ========================================================================
     # CONTEXT MANAGER SUPPORT
