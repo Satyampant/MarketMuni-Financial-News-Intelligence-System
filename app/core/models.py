@@ -39,6 +39,24 @@ class SentimentData:
         return cls(**data)
 
 @dataclass
+class QueryRouting:
+    """Query routing result with MongoDB filter support."""
+    entities: List[str]
+    sectors: List[str]
+    stock_symbols: List[str]
+    sentiment_filter: Optional[str]
+    refined_query: str
+    strategy: QueryIntent
+    confidence: float
+    reasoning: str
+    regulators: List[str] = None
+    temporal_scope: Optional[str] = None
+    
+    def __post_init__(self):
+        if self.regulators is None:
+            self.regulators = []
+
+@dataclass
 class NewsArticle:
     id: str
     title: str
