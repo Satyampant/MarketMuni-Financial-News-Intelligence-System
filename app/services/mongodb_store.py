@@ -1,15 +1,19 @@
 """
 File: app/services/mongodb_store.py
-MongoDB Service Layer with connection management and retry logic.
+MongoDB Service Layer with connection management, retry logic, and CRUD operations.
+Implements Task 4: MongoDB Insert Operations
 """
 
 import logging
 import time
-from typing import Optional
+from typing import Optional, List
 from pymongo import MongoClient
 from pymongo.database import Database
 from pymongo.collection import Collection
-from pymongo.errors import ConnectionFailure, ServerSelectionTimeoutError
+from pymongo.errors import ConnectionFailure, ServerSelectionTimeoutError, BulkWriteError
+from pymongo.results import UpdateResult, InsertManyResult
+
+from app.core.models import NewsArticle
 
 # Configure logger
 logger = logging.getLogger(__name__)
@@ -17,7 +21,7 @@ logger = logging.getLogger(__name__)
 class MongoDBStore:
     """
     MongoDB Service Layer for article storage with connection management.
-    Provides connection pooling, health checks, and retry logic.
+    Provides connection pooling, health checks, retry logic, and CRUD operations.
     """
     
     def __init__(
@@ -65,7 +69,7 @@ class MongoDBStore:
                 self.collection = self.db[self.collection_name]
                 self.is_connected = True
                 
-                logger.info(f"MongoDB connected successfully: {self.database_name}.{self.collection_name}")
+                logger.info(f"✓ MongoDB connected: {self.database_name}.{self.collection_name}")
                 return True
                 
             except (ConnectionFailure, ServerSelectionTimeoutError) as e:
@@ -107,6 +111,109 @@ class MongoDBStore:
                 self.db = None
                 self.collection = None
                 self.is_connected = False
+
+    # ========================================================================
+    # TASK 4: MONGODB INSERT OPERATIONS
+    # ========================================================================
+    
+    def insert_article(self, article: NewsArticle) -> str:
+        """
+        Insert or update article in MongoDB using upsert to handle duplicates.
+        
+        Args:
+            article: NewsArticle object to insert
+            
+        Returns:
+            Article ID (business key) as string
+            
+        Raises:
+            ConnectionError: If not connected to MongoDB
+            Exception: For other database errors
+        """
+        if not self.is_connected or not self.collection:
+            raise ConnectionError("Not connected to MongoDB")
+        
+        # Convert article to MongoDB document format
+        mongo_doc = article.to_mongo_document()
+        
+        # Use upsert with article.id as unique key to handle duplicates
+        result: UpdateResult = self.collection.replace_one(
+            {"id": article.id},
+            mongo_doc,
+            upsert=True
+        )
+        
+        # Return the business key (article.id) which is known and avoids extra read
+        # MongoDB _id is only for internal use
+        return article.id
+    
+    def bulk_insert_articles(self, articles: List[NewsArticle]) -> List[str]:
+        """
+        Batch insert or update multiple articles using bulk write operations.
+        Uses ReplaceOne with upsert=True to handle duplicates gracefully.
+        
+        Args:
+            articles: List of NewsArticle objects to insert/update
+            
+        Returns:
+            List of article IDs (business keys) for successfully processed articles
+            
+        Raises:
+            ConnectionError: If not connected to MongoDB
+        """
+        if not self.is_connected or not self.collection:
+            raise ConnectionError("Not connected to MongoDB")
+        
+        if not articles:
+            return []
+        
+        # Prepare bulk operations: Replace document if ID exists, Insert if not.
+        operations = [
+            ReplaceOne(
+                filter={"id": article.id},           # Match by business ID
+                replacement=article.to_mongo_document(),
+                upsert=True                          # Update if exists, Insert if new
+            )
+            for article in articles
+        ]
+        
+        try:
+            # ordered=False allows parallel processing and doesn't stop on a single failure
+            result = self.collection.bulk_write(operations, ordered=False)
+            
+            logger.info(
+                f"✓ Bulk operation complete: {result.upserted_count} inserted, "
+                f"{result.modified_count} updated, "
+                f"{result.matched_count} matched."
+            )
+            
+            # Since we used upsert, we can assume all valid articles in the list 
+            # are now present in the database.
+            return [article.id for article in articles]
+            
+        except BulkWriteError as e:
+            # Handle partial failures (e.g., validation errors, network glitches)
+            logger.error(f"Bulk write error details: {e.details}")
+            
+            # Extract IDs that failed to write
+            write_errors = e.details.get('writeErrors', [])
+            failed_indices = {error['index'] for error in write_errors}
+            
+            # Return only the IDs that didn't fail
+            successful_ids = [
+                articles[i].id 
+                for i in range(len(articles)) 
+                if i not in failed_indices
+            ]
+            return successful_ids
+            
+        except Exception as e:
+            logger.error(f"Unexpected error during bulk insert: {str(e)}")
+            raise
+
+    # ========================================================================
+    # CONTEXT MANAGER SUPPORT
+    # ========================================================================
 
     def __enter__(self):
         return self
