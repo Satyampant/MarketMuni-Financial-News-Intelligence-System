@@ -1,6 +1,6 @@
 """
-File: app/services/mongodb_store.py
-MongoDB Service Layer with Task 7: MongoDB Index Creation
+File: app/services/mongodb_store.py (UPDATED with Task 20)
+MongoDB Service Layer with Statistics Aggregation Methods
 """
 
 import logging
@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 class MongoDBStore:
     """
     MongoDB Service Layer for article storage with connection management.
-    Provides connection pooling, health checks, retry logic, and CRUD operations.
+    Provides connection pooling, health checks, retry logic, CRUD operations, and statistics aggregation.
     """
     
     def __init__(
@@ -46,7 +46,6 @@ class MongoDBStore:
         
         self.connect()
         
-        # Create indexes after successful connection
         if self.is_connected:
             self.create_indexes()
     
@@ -349,7 +348,6 @@ class MongoDBStore:
             return
         
         try:
-            # Index 1: Unique index on article ID (business key)
             self.collection.create_index(
                 [("id", ASCENDING)],
                 unique=True,
@@ -357,42 +355,36 @@ class MongoDBStore:
             )
             logger.info("✓ Created unique index on 'id' field")
             
-            # Index 2: Index on entities.Sectors for sector filtering
             self.collection.create_index(
                 [("entities.Sectors", ASCENDING)],
                 name="idx_sectors"
             )
             logger.info("✓ Created index on 'entities.Sectors' field")
             
-            # Index 3: Index on entities.Companies for company filtering
             self.collection.create_index(
                 [("entities.Companies", ASCENDING)],
                 name="idx_companies"
             )
             logger.info("✓ Created index on 'entities.Companies' field")
             
-            # Index 4: Index on impacted_stocks.symbol for stock filtering
             self.collection.create_index(
                 [("impacted_stocks.symbol", ASCENDING)],
                 name="idx_stocks"
             )
             logger.info("✓ Created index on 'impacted_stocks.symbol' field")
             
-            # Index 5: Index on sentiment.classification for sentiment filtering
             self.collection.create_index(
                 [("sentiment.classification", ASCENDING)],
                 name="idx_sentiment"
             )
             logger.info("✓ Created index on 'sentiment.classification' field")
             
-            # Index 6: Index on timestamp for recency sorting (descending for recent-first)
             self.collection.create_index(
                 [("timestamp", DESCENDING)],
                 name="idx_timestamp"
             )
             logger.info("✓ Created index on 'timestamp' field")
             
-            # Index 7: Compound index for combined sector + sentiment + timestamp queries
             self.collection.create_index(
                 [
                     ("entities.Sectors", ASCENDING),
@@ -410,6 +402,195 @@ class MongoDBStore:
             raise
         except Exception as e:
             logger.error(f"Unexpected error creating indexes: {str(e)}")
+            raise
+
+    # ========================================================================
+    # MONGODB STATISTICS AGGREGATION
+    # ========================================================================
+    
+    def get_sentiment_statistics(self) -> Dict[str, Any]:
+        """
+        Aggregate sentiment distribution across all articles using MongoDB aggregation pipeline.
+        Returns statistics matching the format used by stats endpoint.
+        """
+        if not self.is_connected or not self.collection:
+            raise ConnectionError("Not connected to MongoDB")
+        
+        try:
+            pipeline = [
+                {
+                    "$match": {
+                        "sentiment": {"$ne": None}
+                    }
+                },
+                {
+                    "$group": {
+                        "_id": "$sentiment.classification",
+                        "count": {"$sum": 1},
+                        "avg_confidence": {"$avg": "$sentiment.confidence_score"},
+                        "avg_signal_strength": {"$avg": "$sentiment.signal_strength"}
+                    }
+                }
+            ]
+            
+            results = list(self.collection.aggregate(pipeline))
+            
+            sentiment_distribution = {
+                "Bullish": 0,
+                "Bearish": 0,
+                "Neutral": 0
+            }
+            
+            total_articles = 0
+            total_confidence = 0.0
+            total_signal = 0.0
+            
+            for result in results:
+                classification = result["_id"]
+                count = result["count"]
+                
+                if classification in sentiment_distribution:
+                    sentiment_distribution[classification] = count
+                    total_articles += count
+                    total_confidence += result["avg_confidence"] * count
+                    total_signal += result["avg_signal_strength"] * count
+            
+            if total_articles == 0:
+                return {
+                    "total_articles": 0,
+                    "bullish_count": 0,
+                    "bearish_count": 0,
+                    "neutral_count": 0,
+                    "bullish_percentage": 0.0,
+                    "bearish_percentage": 0.0,
+                    "neutral_percentage": 0.0,
+                    "avg_confidence_score": 0.0,
+                    "avg_signal_strength": 0.0
+                }
+            
+            return {
+                "total_articles": total_articles,
+                "bullish_count": sentiment_distribution["Bullish"],
+                "bearish_count": sentiment_distribution["Bearish"],
+                "neutral_count": sentiment_distribution["Neutral"],
+                "bullish_percentage": round(sentiment_distribution["Bullish"] / total_articles * 100, 2),
+                "bearish_percentage": round(sentiment_distribution["Bearish"] / total_articles * 100, 2),
+                "neutral_percentage": round(sentiment_distribution["Neutral"] / total_articles * 100, 2),
+                "avg_confidence_score": round(total_confidence / total_articles, 2),
+                "avg_signal_strength": round(total_signal / total_articles, 2)
+            }
+            
+        except Exception as e:
+            logger.error(f"Error aggregating sentiment statistics: {str(e)}")
+            raise
+    
+    def get_supply_chain_statistics(self) -> Dict[str, Any]:
+        """
+        Aggregate supply chain impact statistics across all articles.
+        Returns cross-impact counts and distribution.
+        """
+        if not self.is_connected or not self.collection:
+            raise ConnectionError("Not connected to MongoDB")
+        
+        try:
+            pipeline = [
+                {
+                    "$match": {
+                        "cross_impacts": {"$exists": True, "$ne": []}
+                    }
+                },
+                {
+                    "$project": {
+                        "id": 1,
+                        "cross_impacts": 1,
+                        "impact_count": {"$size": "$cross_impacts"}
+                    }
+                },
+                {
+                    "$group": {
+                        "_id": None,
+                        "total_articles": {"$sum": 1},
+                        "total_impacts": {"$sum": "$impact_count"},
+                        "max_impacts": {"$max": "$impact_count"},
+                        "avg_impacts": {"$avg": "$impact_count"}
+                    }
+                }
+            ]
+            
+            results = list(self.collection.aggregate(pipeline))
+            
+            if not results or results[0]["_id"] is None:
+                return {
+                    "total_articles_with_impacts": 0,
+                    "total_cross_impacts": 0,
+                    "avg_impacts_per_article": 0.0,
+                    "max_impacts_in_article": 0
+                }
+            
+            stats = results[0]
+            
+            # Get relationship type breakdown
+            relationship_pipeline = [
+                {
+                    "$match": {
+                        "cross_impacts": {"$exists": True, "$ne": []}
+                    }
+                },
+                {
+                    "$unwind": "$cross_impacts"
+                },
+                {
+                    "$group": {
+                        "_id": "$cross_impacts.relationship_type",
+                        "count": {"$sum": 1}
+                    }
+                }
+            ]
+            
+            relationship_results = list(self.collection.aggregate(relationship_pipeline))
+            
+            relationship_distribution = {
+                "upstream_demand_shock": 0,
+                "downstream_supply_impact": 0
+            }
+            
+            for result in relationship_results:
+                rel_type = result["_id"]
+                if rel_type in relationship_distribution:
+                    relationship_distribution[rel_type] = result["count"]
+            
+            # Get unique sectors impacted
+            sector_pipeline = [
+                {
+                    "$match": {
+                        "cross_impacts": {"$exists": True, "$ne": []}
+                    }
+                },
+                {
+                    "$unwind": "$cross_impacts"
+                },
+                {
+                    "$group": {
+                        "_id": "$cross_impacts.target_sector"
+                    }
+                }
+            ]
+            
+            sector_results = list(self.collection.aggregate(sector_pipeline))
+            unique_sectors = len(sector_results)
+            
+            return {
+                "total_articles_with_impacts": stats["total_articles"],
+                "total_cross_impacts": stats["total_impacts"],
+                "avg_impacts_per_article": round(stats["avg_impacts"], 2),
+                "max_impacts_in_article": stats["max_impacts"],
+                "upstream_impacts": relationship_distribution["upstream_demand_shock"],
+                "downstream_impacts": relationship_distribution["downstream_supply_impact"],
+                "unique_target_sectors": unique_sectors
+            }
+            
+        except Exception as e:
+            logger.error(f"Error aggregating supply chain statistics: {str(e)}")
             raise
 
     # ========================================================================
