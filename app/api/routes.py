@@ -1,6 +1,5 @@
 """
-Updated app/api/routes.py - Integration of MongoDBStore
-Replaces in-memory NewsStorage with MongoDB integration.
+Updates article retrieval endpoints and query explanation endpoint to use MongoDB.
 """
 
 from fastapi import APIRouter, HTTPException, Query
@@ -22,7 +21,6 @@ from app.agents.llm_supply_chain import LLMSupplyChainAnalyzer
 from app.workflows.graph import NewsIntelligenceGraph
 from app.core.config import Paths
 from app.core.config_loader import get_config
-from app.agents.query_router import QueryRouterSchema, QueryIntent
 
 config = get_config()
 router = APIRouter()
@@ -42,27 +40,22 @@ vector_store = VectorStore(
 
 dedup_agent = DeduplicationAgent()
 
-# LLM entity extraction
 print("✓ Initializing LLM-based entity extraction")
 entity_extractor = LLMEntityExtractor(
     enable_caching=config.performance.cache_embeddings
 )
 
-# LLM stock impact mapper
 print("✓ Initializing LLM-based stock impact mapper")
 stock_mapper = LLMStockImpactMapper()
 
-# LLM sentiment analyzer
 print("✓ Initializing LLM-based sentiment analyzer")
 sentiment_analyzer = LLMSentimentAnalyzer(
     use_entity_context=True
 )
 
-# LLM supply chain analyzer
 print("✓ Initializing LLM-based supply chain analyzer")
 supply_chain_analyzer = LLMSupplyChainAnalyzer()
 
-# Orchestrator setup with full LLM pipeline
 news_graph = NewsIntelligenceGraph(
     mongodb_store=mongodb_store,  
     vector_store=vector_store,
@@ -91,12 +84,9 @@ async def root():
 
 @router.get("/health", tags=["General"])
 async def health_check():
-    """
-    Comprehensive health check including Redis cache, MongoDB, and LLM services.
-    """
+    """Comprehensive health check including MongoDB and LLM services."""
     cache_stats = entity_extractor.get_cache_stats()
     
-    # Check MongoDB connection
     mongo_connected = mongodb_store.is_connected
     
     health_status = {
@@ -132,7 +122,6 @@ async def health_check():
         }
     }
     
-    # Add Redis-specific stats if connected
     if cache_stats.get("connected"):
         health_status["components"]["redis_cache"] = {
             "status": "healthy",
@@ -162,12 +151,7 @@ async def get_cache_stats():
 
 @router.post("/cache/clear", tags=["Cache"])
 async def clear_cache(article_id: Optional[str] = None):
-    """
-    Clear cache entries.
-    
-    Args:
-        article_id: Specific article to clear (None = clear all)
-    """
+    """Clear cache entries."""
     cleared = entity_extractor.clear_cache(article_id)
     
     return {
@@ -179,9 +163,7 @@ async def clear_cache(article_id: Optional[str] = None):
 
 @router.post("/ingest", response_model=IngestResponse, tags=["Ingestion"])
 async def ingest_article(article_input: ArticleInput):
-    """
-    Ingest a financial news article with full LLM pipeline.
-    """
+    """Ingest a financial news article with full LLM pipeline."""
     try:
         article = NewsArticle(
             id=article_input.id,
@@ -192,13 +174,11 @@ async def ingest_article(article_input: ArticleInput):
             raw_text=article_input.raw_text or article_input.content
         )
         
-        # Run graph pipeline
         result = news_graph.run_pipeline(article)
         
         if result.get("error"):
             raise HTTPException(status_code=400, detail=result["error"])
         
-        # Extract pipeline stats for response
         stats = result.get("stats", {})
         entities_stats = stats.get("entities_extracted", {})
         impact_breakdown = stats.get("impact_breakdown", {})
@@ -256,7 +236,6 @@ async def query_articles(
         if result.get("error"):
             raise HTTPException(status_code=400, detail=result["error"])
             
-        # Format results
         articles = result.get("query_results", [])[:top_k]
         article_outputs = []
         
@@ -286,7 +265,7 @@ async def query_articles(
 @router.post("/query/explain", tags=["Query"])
 async def explain_query(query_text: str = Query(..., description="Natural language query to explain")):
     """
-    Debug endpoint: Show how LLM routes and expands query.
+    TASK 23: Debug endpoint showing query routing and MongoDB filter generation.
     """
     try:
         if not query_text.strip():
@@ -295,8 +274,14 @@ async def explain_query(query_text: str = Query(..., description="Natural langua
         # Route query using LLM
         routing = news_graph.query_router.route_query(query_text)
         
-        # Generate suggested ChromaDB where clause based on routing
-        suggested_where_clause = _generate_where_clause(routing)
+        # Generate MongoDB filter
+        mongodb_filter = news_graph.query_router.generate_mongodb_filter(routing)
+        
+        # Count potential matches
+        filtered_count = mongodb_store.count_articles(mongodb_filter)
+        
+        # Predict strategy based on count
+        strategy_prediction = "mongo_filter_first" if filtered_count <= config.mongodb.max_filter_ids else "vector_search_first"
         
         return {
             "original_query": query_text,
@@ -316,9 +301,12 @@ async def explain_query(query_text: str = Query(..., description="Natural langua
                 "sentiment_filter": routing.sentiment_filter,
                 "temporal_scope": routing.temporal_scope
             },
-            "metadata_filters": {
-                "suggested_where_clause": suggested_where_clause,
-                "explanation": _explain_where_clause(routing)
+            "mongodb_execution": {
+                "filter": mongodb_filter,
+                "filtered_count": filtered_count,
+                "predicted_strategy": strategy_prediction,
+                "threshold": config.mongodb.max_filter_ids,
+                "explanation": _explain_mongodb_strategy(routing, mongodb_filter, filtered_count)
             }
         }
         
@@ -326,179 +314,29 @@ async def explain_query(query_text: str = Query(..., description="Natural langua
         raise HTTPException(status_code=500, detail=f"Query explanation error: {str(e)}")
 
 
-def _generate_where_clause(routing: QueryRouterSchema) -> dict:
-    """Generate ChromaDB where filter based on routing strategy."""
-    if routing.strategy == QueryIntent.DIRECT_ENTITY:
-        if routing.stock_symbols:
-            if len(routing.stock_symbols) == 1:
-                symbol = routing.stock_symbols[0]
-                return {
-                    "$or": [
-                        {"impacted_stocks": {"$contains": f'"{symbol}"'}},
-                        {"impacted_stocks": {"$contains": f"'{symbol}'"}}
-                    ]
-                }
-            else:
-                conditions = []
-                for symbol in routing.stock_symbols:
-                    conditions.extend([
-                        {"impacted_stocks": {"$contains": f'"{symbol}"'}},
-                        {"impacted_stocks": {"$contains": f"'{symbol}'"}}
-                    ])
-                return {"$or": conditions}
-        
-        elif routing.entities:
-            if len(routing.entities) == 1:
-                return {"entities": {"$contains": f'"{routing.entities[0]}"'}}
-            else:
-                return {
-                    "$or": [
-                        {"entities": {"$contains": f'"{entity}"'}}
-                        for entity in routing.entities
-                    ]
-                }
-        return None
+def _explain_mongodb_strategy(routing, mongodb_filter: dict, filtered_count: int) -> str:
+    """Generate human-readable explanation of MongoDB execution strategy."""
+    if not mongodb_filter or mongodb_filter == {}:
+        return "No MongoDB filtering applied - will use unrestricted vector search"
     
-    elif routing.strategy == QueryIntent.SECTOR_WIDE:
-        if routing.sectors:
-            if len(routing.sectors) == 1:
-                return {"entities": {"$contains": f'"{routing.sectors[0]}"'}}
-            else:
-                return {
-                    "$or": [
-                        {"entities": {"$contains": f'"{sector}"'}}
-                        for sector in routing.sectors
-                    ]
-                }
-        return None
+    threshold = config.mongodb.max_filter_ids
     
-    elif routing.strategy == QueryIntent.REGULATORY:
-        if routing.regulators:
-            if len(routing.regulators) == 1:
-                return {"entities": {"$contains": f'"{routing.regulators[0]}"'}}
-            else:
-                return {
-                    "$or": [
-                        {"entities": {"$contains": f'"{regulator}"'}}
-                        for regulator in routing.regulators
-                    ]
-                }
-        return None
-    
-    elif routing.strategy == QueryIntent.SENTIMENT_DRIVEN:
-        if routing.sentiment_filter:
-            base_filter = {"sentiment_classification": routing.sentiment_filter}
-            if routing.sectors:
-                sector_conditions = [
-                    {"entities": {"$contains": f'"{sector}"'}}
-                    for sector in routing.sectors
-                ]
-                if len(routing.sectors) == 1:
-                    return {"$and": [base_filter, sector_conditions[0]]}
-                else:
-                    return {"$and": [base_filter, {"$or": sector_conditions}]}
-            return base_filter
-        return None
-    
-    elif routing.strategy == QueryIntent.CROSS_IMPACT:
-        if len(routing.sectors) >= 2:
-            return {
-                "$or": [
-                    {"entities": {"$contains": f'"{sector}"'}}
-                    for sector in routing.sectors
-                ]
-            }
-        elif routing.sectors:
-            return {"entities": {"$contains": f'"{routing.sectors[0]}"'}}
-        return None
-    
-    elif routing.strategy == QueryIntent.TEMPORAL:
-        if routing.stock_symbols:
-            symbol = routing.stock_symbols[0]
-            return {
-                "$or": [
-                    {"impacted_stocks": {"$contains": f'"{symbol}"'}},
-                    {"impacted_stocks": {"$contains": f"'{symbol}'"}}
-                ]
-            }
-        elif routing.entities:
-            return {"entities": {"$contains": f'"{routing.entities[0]}"'}}
-        return None
-    
-    elif routing.strategy == QueryIntent.SEMANTIC_SEARCH:
-        return None
-    
-    return None
-
-
-def _explain_where_clause(routing: QueryRouterSchema) -> str:
-    """Generate human-readable explanation of the metadata filter."""
-    if routing.strategy == QueryIntent.DIRECT_ENTITY:
-        if routing.stock_symbols:
-            symbols = ", ".join(routing.stock_symbols)
-            return f"Filter articles where impacted_stocks contains any of: {symbols}"
-        elif routing.entities:
-            entities = ", ".join(routing.entities)
-            return f"Filter articles where entities mention: {entities}"
-        return "No metadata filtering (semantic search on entities)"
-    
-    elif routing.strategy == QueryIntent.SECTOR_WIDE:
-        if routing.sectors:
-            sectors = ", ".join(routing.sectors)
-            return f"Filter articles related to sectors: {sectors}"
-        return "No sector filtering available"
-    
-    elif routing.strategy == QueryIntent.REGULATORY:
-        if routing.regulators:
-            regulators = ", ".join(routing.regulators)
-            return f"Filter articles mentioning regulators: {regulators}"
-        return "No regulator filtering available"
-    
-    elif routing.strategy == QueryIntent.SENTIMENT_DRIVEN:
-        if routing.sentiment_filter:
-            explanation = f"Filter articles with sentiment: {routing.sentiment_filter}"
-            if routing.sectors:
-                sectors = ", ".join(routing.sectors)
-                explanation += f" AND in sectors: {sectors}"
-            return explanation
-        return "No sentiment filtering available"
-    
-    elif routing.strategy == QueryIntent.CROSS_IMPACT:
-        if len(routing.sectors) >= 2:
-            sectors = ", ".join(routing.sectors)
-            return f"Filter articles mentioning multiple sectors: {sectors} (supply chain analysis)"
-        elif routing.sectors:
-            return f"Filter articles in sector: {routing.sectors[0]}"
-        return "No cross-impact filtering available"
-    
-    elif routing.strategy == QueryIntent.TEMPORAL:
-        explanation = "Time-based filtering with "
-        if routing.stock_symbols:
-            explanation += f"stock symbols: {', '.join(routing.stock_symbols)}"
-        elif routing.entities:
-            explanation += f"entities: {', '.join(routing.entities)}"
-        else:
-            explanation += "semantic search (no metadata filters)"
-        return explanation
-    
-    elif routing.strategy == QueryIntent.SEMANTIC_SEARCH:
-        return "Pure semantic vector search - no metadata filtering applied"
-    
-    return "Unknown strategy - no filtering"
+    if filtered_count == 0:
+        return "No articles match the MongoDB filter - query will return empty results"
+    elif filtered_count <= threshold:
+        return f"STRATEGY A: MongoDB filter returns {filtered_count} articles (≤{threshold}). Will filter in MongoDB first, then perform vector search on filtered IDs for optimal performance."
+    else:
+        return f"STRATEGY B: MongoDB filter returns {filtered_count} articles (>{threshold}). Will perform unrestricted vector search first, then validate results against MongoDB filter to avoid large WHERE IN clauses."
 
 @router.get("/stats", response_model=StatsResponse, tags=["Statistics"])
 async def get_stats():
-    """
-    Retrieve system statistics from MongoDB and Vector Store.
-    """
+    """Retrieve system statistics from MongoDB and Vector Store."""
     try:
-        # Fetch stats directly from MongoDB and Vector Store
         mongo_article_count = mongodb_store.article_count()
         sentiment_stats = mongodb_store.get_sentiment_statistics()
         supply_chain_stats = mongodb_store.get_supply_chain_statistics()
         vector_count = vector_store.count()
         
-        # Construct response matching StatsResponse schema
         stats_data = {
             "total_articles": mongo_article_count,
             "mongodb_stats": {
@@ -512,11 +350,16 @@ async def get_stats():
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Stats error: {str(e)}")
 
+# ============================================================================
+# UPDATE ARTICLE RETRIEVAL ENDPOINTS
+# ============================================================================
+
 @router.get("/article/{article_id}", tags=["Retrieval"])
 async def get_article(article_id: str):
     """
-    Retrieve article by ID with rich entity data, stock impact reasoning, and supply chain impacts.
+    TASK 22: Retrieve article by ID with rich entity data from MongoDB.
     """
+    # Replace storage call with MongoDB call
     article = mongodb_store.get_article_by_id(article_id)
     
     if not article:
@@ -571,6 +414,8 @@ async def get_article(article_id: str):
 
 @router.get("/article/{article_id}/sentiment", response_model=SentimentDetailResponse, tags=["Sentiment"])
 async def get_article_sentiment(article_id: str):
+    """TASK 22: Get sentiment data from MongoDB."""
+    # Replace storage call with MongoDB call
     article = mongodb_store.get_article_by_id(article_id)
     
     if not article:
@@ -592,9 +437,8 @@ async def get_article_sentiment(article_id: str):
 
 @router.get("/article/{article_id}/entities", tags=["Entities"])
 async def get_article_entities(article_id: str):
-    """
-    Get detailed entity extraction data for an article.
-    """
+    """TASK 22: Get detailed entity extraction data from MongoDB."""
+    # Replace storage call with MongoDB call
     article = mongodb_store.get_article_by_id(article_id)
     
     if not article:
@@ -613,9 +457,8 @@ async def get_article_entities(article_id: str):
 
 @router.get("/article/{article_id}/stock_impacts", tags=["Stock Impact"])
 async def get_article_stock_impacts(article_id: str):
-    """
-    Get detailed stock impact analysis for an article.
-    """
+    """TASK 22: Get detailed stock impact analysis from MongoDB."""
+    # Replace storage call with MongoDB call
     article = mongodb_store.get_article_by_id(article_id)
     
     if not article:
@@ -644,9 +487,7 @@ async def get_article_stock_impacts(article_id: str):
 
 @router.get("/article/{article_id}/supply_chain", tags=["Supply Chain"])
 async def get_article_supply_chain_impacts(article_id: str):
-    """
-    Get detailed supply chain impact analysis for an article.
-    """
+    """ Get detailed supply chain impact analysis from MongoDB."""
     article = mongodb_store.get_article_by_id(article_id)
     
     if not article:
