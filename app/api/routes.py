@@ -1,6 +1,6 @@
 """
-Updated app/api/routes.py - Full LLM Pipeline with LLM Supply Chain Analysis
-All agents now use LLM-based approach.
+Updated app/api/routes.py - Integration of MongoDBStore
+Replaces in-memory NewsStorage with MongoDB integration.
 """
 
 from fastapi import APIRouter, HTTPException, Query
@@ -12,22 +12,29 @@ from app.api.schemas import (
     ArticleInput, ArticleOutput, IngestResponse, 
     QueryResponse, StatsResponse, SentimentDetailResponse
 )
-from app.services.storage import NewsStorage
+from app.services.mongodb_store import MongoDBStore  
 from app.services.vector_store import VectorStore
 from app.agents.deduplication import DeduplicationAgent
 from app.agents.llm_entity_extractor import LLMEntityExtractor
 from app.agents.llm_stock_mapper import LLMStockImpactMapper
 from app.agents.llm_sentiment import LLMSentimentAnalyzer
-from app.agents.llm_supply_chain import LLMSupplyChainAnalyzer  # NEW: LLM supply chain
+from app.agents.llm_supply_chain import LLMSupplyChainAnalyzer
 from app.workflows.graph import NewsIntelligenceGraph
 from app.core.config import Paths
 from app.core.config_loader import get_config
+from app.agents.query_router import QueryRouterSchema, QueryIntent
 
 config = get_config()
 router = APIRouter()
 
-# Service initialization
-storage = NewsStorage()
+
+print("✓ Initializing MongoDB connection")
+mongodb_store = MongoDBStore(
+    connection_string=config.mongodb.connection_string,
+    database_name=config.mongodb.database_name,
+    collection_name=config.mongodb.collection_name
+)
+
 vector_store = VectorStore(
     collection_name=config.vector_store.collection_name,
     persist_directory=str(Paths.CHROMA_DB)
@@ -51,32 +58,33 @@ sentiment_analyzer = LLMSentimentAnalyzer(
     use_entity_context=True
 )
 
-# NEW: LLM supply chain analyzer
+# LLM supply chain analyzer
 print("✓ Initializing LLM-based supply chain analyzer")
 supply_chain_analyzer = LLMSupplyChainAnalyzer()
 
 # Orchestrator setup with full LLM pipeline
 news_graph = NewsIntelligenceGraph(
-    storage=storage,
+    mongodb_store=mongodb_store,  
     vector_store=vector_store,
     dedup_agent=dedup_agent,
     entity_extractor=entity_extractor,
     stock_mapper=stock_mapper,
     sentiment_analyzer=sentiment_analyzer,
-    supply_chain_analyzer=supply_chain_analyzer  # NEW: Pass LLM supply chain analyzer
+    supply_chain_analyzer=supply_chain_analyzer
 )
 
 @router.get("/", tags=["General"])
 async def root():
     return {
         "message": "MarketMuni - Financial News Intelligence API",
-        "version": "2.0.0",
+        "version": "2.1.0",
         "features": {
             "entity_extraction": "llm",
             "stock_impact_mapping": "llm",
             "sentiment_analysis": "llm",
-            "supply_chain_analysis": "llm",  # UPDATED
-            "deduplication": "semantic"
+            "supply_chain_analysis": "llm",
+            "deduplication": "semantic",
+            "storage": "mongodb"
         },
         "docs": "/docs"
     }
@@ -84,17 +92,21 @@ async def root():
 @router.get("/health", tags=["General"])
 async def health_check():
     """
-    Comprehensive health check including Redis cache and LLM services.
+    Comprehensive health check including Redis cache, MongoDB, and LLM services.
     """
     cache_stats = entity_extractor.get_cache_stats()
     
+    # Check MongoDB connection
+    mongo_connected = mongodb_store.is_connected
+    
     health_status = {
-        "status": "healthy",
+        "status": "healthy" if mongo_connected else "degraded",
         "timestamp": datetime.now().isoformat(),
         "components": {
-            "storage": {
-                "status": "healthy",
-                "articles_count": storage.article_count()
+            "mongodb": {
+                "status": "healthy" if mongo_connected else "unhealthy",
+                "connected": mongo_connected,
+                "articles_count": mongodb_store.article_count() if mongo_connected else 0
             },
             "vector_store": {
                 "status": "healthy",
@@ -169,10 +181,6 @@ async def clear_cache(article_id: Optional[str] = None):
 async def ingest_article(article_input: ArticleInput):
     """
     Ingest a financial news article with full LLM pipeline.
-    - LLM entity extraction (companies with tickers, sectors, regulators, events)
-    - LLM stock impact mapping with reasoning
-    - LLM sentiment analysis with key factors
-    - LLM supply chain impact analysis with cross-sectoral reasoning
     """
     try:
         article = NewsArticle(
@@ -279,20 +287,12 @@ async def query_articles(
 async def explain_query(query_text: str = Query(..., description="Natural language query to explain")):
     """
     Debug endpoint: Show how LLM routes and expands query.
-    
-    This endpoint provides transparency into the query processing pipeline:
-    - How the LLM interprets the query
-    - Which strategy is selected
-    - What entities are extracted
-    - What metadata filters would be applied
-    
-    Useful for debugging and understanding query behavior.
     """
     try:
         if not query_text.strip():
             raise HTTPException(status_code=400, detail="Query cannot be empty")
         
-        # Route query using LLM (same logic as actual query processing)
+        # Route query using LLM
         routing = news_graph.query_router.route_query(query_text)
         
         # Generate suggested ChromaDB where clause based on routing
@@ -327,22 +327,9 @@ async def explain_query(query_text: str = Query(..., description="Natural langua
 
 
 def _generate_where_clause(routing: QueryRouterSchema) -> dict:
-    """
-    Generate ChromaDB where filter based on routing strategy.
-    
-    This helper translates the routing decision into actual ChromaDB metadata filters
-    that would be used during search.
-    
-    Args:
-        routing: Query routing schema from LLM
-        
-    Returns:
-        ChromaDB where clause dict (or None if no filtering needed)
-    """
+    """Generate ChromaDB where filter based on routing strategy."""
     if routing.strategy == QueryIntent.DIRECT_ENTITY:
-        # Direct entity strategy: Filter by stock symbols or company names
         if routing.stock_symbols:
-            # Prefer stock symbol filtering (highest precision)
             if len(routing.stock_symbols) == 1:
                 symbol = routing.stock_symbols[0]
                 return {
@@ -352,7 +339,6 @@ def _generate_where_clause(routing: QueryRouterSchema) -> dict:
                     ]
                 }
             else:
-                # Multiple symbols - use OR logic
                 conditions = []
                 for symbol in routing.stock_symbols:
                     conditions.extend([
@@ -362,7 +348,6 @@ def _generate_where_clause(routing: QueryRouterSchema) -> dict:
                 return {"$or": conditions}
         
         elif routing.entities:
-            # Fallback to company name filtering
             if len(routing.entities) == 1:
                 return {"entities": {"$contains": f'"{routing.entities[0]}"'}}
             else:
@@ -372,11 +357,9 @@ def _generate_where_clause(routing: QueryRouterSchema) -> dict:
                         for entity in routing.entities
                     ]
                 }
-        
         return None
     
     elif routing.strategy == QueryIntent.SECTOR_WIDE:
-        # Sector strategy: Filter by sector names
         if routing.sectors:
             if len(routing.sectors) == 1:
                 return {"entities": {"$contains": f'"{routing.sectors[0]}"'}}
@@ -390,7 +373,6 @@ def _generate_where_clause(routing: QueryRouterSchema) -> dict:
         return None
     
     elif routing.strategy == QueryIntent.REGULATORY:
-        # Regulatory strategy: Filter by regulator names
         if routing.regulators:
             if len(routing.regulators) == 1:
                 return {"entities": {"$contains": f'"{routing.regulators[0]}"'}}
@@ -404,37 +386,21 @@ def _generate_where_clause(routing: QueryRouterSchema) -> dict:
         return None
     
     elif routing.strategy == QueryIntent.SENTIMENT_DRIVEN:
-        # Sentiment strategy: Filter by sentiment + optional sectors
         if routing.sentiment_filter:
             base_filter = {"sentiment_classification": routing.sentiment_filter}
-            
             if routing.sectors:
-                # Combine sentiment filter with sector filter
                 sector_conditions = [
                     {"entities": {"$contains": f'"{sector}"'}}
                     for sector in routing.sectors
                 ]
-                
                 if len(routing.sectors) == 1:
-                    return {
-                        "$and": [
-                            base_filter,
-                            sector_conditions[0]
-                        ]
-                    }
+                    return {"$and": [base_filter, sector_conditions[0]]}
                 else:
-                    return {
-                        "$and": [
-                            base_filter,
-                            {"$or": sector_conditions}
-                        ]
-                    }
-            
+                    return {"$and": [base_filter, {"$or": sector_conditions}]}
             return base_filter
         return None
     
     elif routing.strategy == QueryIntent.CROSS_IMPACT:
-        # Cross-impact strategy: Filter by multiple sectors
         if len(routing.sectors) >= 2:
             return {
                 "$or": [
@@ -447,7 +413,6 @@ def _generate_where_clause(routing: QueryRouterSchema) -> dict:
         return None
     
     elif routing.strategy == QueryIntent.TEMPORAL:
-        # Temporal strategy: Falls back to entity filtering if available
         if routing.stock_symbols:
             symbol = routing.stock_symbols[0]
             return {
@@ -461,22 +426,13 @@ def _generate_where_clause(routing: QueryRouterSchema) -> dict:
         return None
     
     elif routing.strategy == QueryIntent.SEMANTIC_SEARCH:
-        # Semantic search: No metadata filtering (pure vector search)
         return None
     
     return None
 
 
 def _explain_where_clause(routing: QueryRouterSchema) -> str:
-    """
-    Generate human-readable explanation of the metadata filter.
-    
-    Args:
-        routing: Query routing schema from LLM
-        
-    Returns:
-        Plain English explanation of what the filter does
-    """
+    """Generate human-readable explanation of the metadata filter."""
     if routing.strategy == QueryIntent.DIRECT_ENTITY:
         if routing.stock_symbols:
             symbols = ", ".join(routing.stock_symbols)
@@ -543,13 +499,13 @@ async def get_article(article_id: str):
     """
     Retrieve article by ID with rich entity data, stock impact reasoning, and supply chain impacts.
     """
-    article = storage.get_by_id(article_id)
+    article = mongodb_store.get_article_by_id(article_id)
+    
     if not article:
         raise HTTPException(status_code=404, detail="Article not found")
         
     sentiment_dict = article.sentiment if article.has_sentiment() else None
     
-    # Include rich entity data if available
     response_data = {
         "id": article.id,
         "title": article.title,
@@ -562,12 +518,10 @@ async def get_article(article_id: str):
         "cross_impacts": article.cross_impacts if hasattr(article, 'cross_impacts') else []
     }
     
-    # Add rich entity data with tickers
     if article.entities_rich:
         response_data["entities_rich"] = article.entities_rich
         response_data["company_tickers"] = article.get_company_tickers()
     
-    # Add stock impact reasoning (from LLM)
     if article.impacted_stocks:
         response_data["stock_impact_summary"] = {
             "total_stocks": len(article.impacted_stocks),
@@ -576,7 +530,6 @@ async def get_article(article_id: str):
             "regulatory_impacts": sum(1 for s in article.impacted_stocks if s["impact_type"] == "regulatory")
         }
     
-    # Add supply chain impact summary (from LLM)
     if article.has_cross_impacts():
         upstream_count = sum(1 for i in article.cross_impacts if i["relationship_type"] == "upstream_demand_shock")
         downstream_count = sum(1 for i in article.cross_impacts if i["relationship_type"] == "downstream_supply_impact")
@@ -590,7 +543,6 @@ async def get_article(article_id: str):
             "analysis_method": "llm"
         }
     
-    # Add sentiment key factors if available
     if sentiment_dict:
         sentiment_breakdown = sentiment_dict.get("sentiment_breakdown", {})
         key_factors = sentiment_breakdown.get("key_factors", [])
@@ -601,7 +553,8 @@ async def get_article(article_id: str):
 
 @router.get("/article/{article_id}/sentiment", response_model=SentimentDetailResponse, tags=["Sentiment"])
 async def get_article_sentiment(article_id: str):
-    article = storage.get_by_id(article_id)
+    article = mongodb_store.get_article_by_id(article_id)
+    
     if not article:
         raise HTTPException(status_code=404, detail="Article not found")
     if not article.has_sentiment():
@@ -623,9 +576,9 @@ async def get_article_sentiment(article_id: str):
 async def get_article_entities(article_id: str):
     """
     Get detailed entity extraction data for an article.
-    Returns companies with tickers, confidence scores, and extraction reasoning.
     """
-    article = storage.get_by_id(article_id)
+    article = mongodb_store.get_article_by_id(article_id)
+    
     if not article:
         raise HTTPException(status_code=404, detail="Article not found")
     
@@ -644,9 +597,9 @@ async def get_article_entities(article_id: str):
 async def get_article_stock_impacts(article_id: str):
     """
     Get detailed stock impact analysis for an article.
-    Returns LLM reasoning for each impacted stock.
     """
-    article = storage.get_by_id(article_id)
+    article = mongodb_store.get_article_by_id(article_id)
+    
     if not article:
         raise HTTPException(status_code=404, detail="Article not found")
     
@@ -675,9 +628,9 @@ async def get_article_stock_impacts(article_id: str):
 async def get_article_supply_chain_impacts(article_id: str):
     """
     Get detailed supply chain impact analysis for an article.
-    Returns LLM reasoning for upstream and downstream effects.
     """
-    article = storage.get_by_id(article_id)
+    article = mongodb_store.get_article_by_id(article_id)
+    
     if not article:
         raise HTTPException(status_code=404, detail="Article not found")
     
