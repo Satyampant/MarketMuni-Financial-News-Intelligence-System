@@ -66,12 +66,26 @@ class TwoStepQueryProcessor:
         # Step 3: Generate MongoDB filter
         mongodb_filter = self.query_router.generate_mongodb_filter(routing)
         
+        # This ensures the filter is applied regardless of the strategy chosen by the LLM
+        if sentiment_filter:
+            mongodb_filter["sentiment.classification"] = sentiment_filter
+
         # Step 4: Count potential matches
         filtered_count = self.mongodb_store.count_articles(mongodb_filter)
         
-        # Step 5: CRITICAL - Broad Filter Optimization
+        if filtered_count == 0 and sentiment_filter:
+                    mongodb_filter = {"sentiment.classification": sentiment_filter}
+                    filtered_count = self.mongodb_store.count_articles(mongodb_filter)
+
+        # Broad Filter Optimization
         if filtered_count == 0:
-            # No matches - return empty
+            routing.strategy_metadata = {
+                "strategy_used": "no_results",
+                "filtered_count": 0,
+                "vector_candidates": 0,
+                "mongodb_filter_applied": bool(mongodb_filter),
+                "threshold": self.max_filter_ids
+            }
             return [], routing
         
         elif filtered_count <= self.max_filter_ids:
