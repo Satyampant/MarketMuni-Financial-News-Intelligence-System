@@ -141,7 +141,6 @@ class NewsIntelligenceGraph:
             return {"error": "Article missing required fields"}
         
         if isinstance(article.timestamp, str):
-            from datetime import datetime
             article.timestamp = datetime.fromisoformat(article.timestamp)
         
         article_embedding = self.vector_store.create_embedding(
@@ -409,9 +408,9 @@ class NewsIntelligenceGraph:
         if all_impacts:
             top_impact = all_impacts[0]
             stats["top_cross_impact"] = {
-                "target_sector": top_impact.get("target_sector"),
-                "impact_score": top_impact.get("impact_score"),
-                "relationship_type": top_impact.get("relationship_type")
+                "target_sector": top_impact.target_sector,
+                "impact_score": top_impact.impact_score,
+                "relationship_type": top_impact.relationship_type
             }
         
         return {

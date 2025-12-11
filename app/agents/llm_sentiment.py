@@ -36,7 +36,7 @@ class LLMSentimentAnalyzer:
         print(f"✓ LLMSentimentAnalyzer initialized")
     
     def _build_few_shot_examples(self) -> str:
-        return self.config.prompts.sentiment_analysis.get('few_shot_examples', '')
+        return self.config.prompts.sentiment_analysis.few_shot_examples
     
     def _format_entity_context(self, entities: EntityExtractionSchema) -> str:
         """Format entity extraction results into a context string."""
@@ -72,7 +72,7 @@ class LLMSentimentAnalyzer:
         entities: Optional[EntityExtractionSchema] = None
     ) -> str:
         """Construct the main prompt using article content and entity context."""
-        prompt_template = self.config.prompts.sentiment_analysis.get('task_prompt', '')
+        prompt_template = self.config.prompts.sentiment_analysis.task_prompt
         
         entity_context = ""
         if self.use_entity_context and entities:
@@ -90,7 +90,7 @@ class LLMSentimentAnalyzer:
         entities: Optional[EntityExtractionSchema] = None
     ) -> SentimentAnalysisSchema:
         """Execute LLM analysis and validate against Pydantic schema."""
-        system_message_template = self.config.prompts.sentiment_analysis.get('system_message', '')
+        system_message_template = self.config.prompts.sentiment_analysis.system_message
         few_shot_examples = self._build_few_shot_examples()
         system_message = system_message_template.format(few_shot_examples=few_shot_examples)
         

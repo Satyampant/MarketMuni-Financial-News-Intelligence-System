@@ -45,7 +45,7 @@ class LLMSupplyChainAnalyzer:
         print(f"  - Min impact score: {self.min_impact_score}")
     
     def _build_few_shot_examples(self) -> str:
-        return self.config.prompts.supply_chain.get('few_shot_examples', '')
+        return self.config.prompts.supply_chain.few_shot_examples
         
     def _format_entity_context(self, entities: EntityExtractionSchema) -> str:
         """Formats extracted entities (companies, sectors, regulators) for the prompt."""
@@ -83,7 +83,7 @@ Key Factors:
         entities: EntityExtractionSchema,
         sentiment: SentimentAnalysisSchema
     ) -> str:
-        prompt_template = self.config.prompts.supply_chain.get('task_prompt', '')
+        prompt_template = self.config.prompts.supply_chain.task_prompt
         entity_context = self._format_entity_context(entities)
         sentiment_context = self._format_sentiment_context(sentiment)
         
@@ -104,7 +104,7 @@ Key Factors:
     ) -> SupplyChainImpactSchema:
         """Generates supply chain impact predictions using LLM reasoning."""
         
-        system_message_template = self.config.prompts.supply_chain.get('system_message', '')
+        system_message_template = self.config.prompts.supply_chain.system_message
         few_shot_examples = self._build_few_shot_examples()
         system_message = system_message_template.format(
             few_shot_examples=few_shot_examples,

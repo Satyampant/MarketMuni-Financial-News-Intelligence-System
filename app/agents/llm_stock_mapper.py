@@ -42,7 +42,7 @@ class LLMStockImpactMapper:
         entities: EntityExtractionSchema,
         article: NewsArticle
     ) -> str:
-        prompt_template = self.config.prompts.stock_impact.get('task_prompt', '')
+        prompt_template = self.config.prompts.stock_impact.task_prompt
 
         companies_str = ""
         if entities.companies:
@@ -92,7 +92,7 @@ class LLMStockImpactMapper:
         article: NewsArticle
     ) -> StockImpactSchema:
         """Map news article to affected stock symbols using LLM reasoning."""
-        system_message = self.config.prompts.stock_impact.get('system_message', '')
+        system_message = self.config.prompts.stock_impact.system_message
         
         prompt = self._build_impact_analysis_prompt(entities, article)
         
