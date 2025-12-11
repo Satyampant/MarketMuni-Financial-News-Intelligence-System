@@ -79,14 +79,37 @@ class TwoStepQueryProcessor:
 
         # Broad Filter Optimization
         if filtered_count == 0:
+            # FALLBACK: Perform unrestricted vector search
+            strategy_used = "vector_search_fallback"
+            
+            # Generate query embedding
+            query_embedding = self.vector_store.create_embedding(routing.refined_query)
+            
+            # Perform unrestricted vector search (no MongoDB filtering)
+            vector_results = self.vector_store.search(
+                query="",
+                query_embedding=query_embedding,
+                top_k=top_k * 2
+            )
+            
+            # If sentiment filter provided, apply post-filtering
+            if sentiment_filter:
+                candidate_ids = [r["article_id"] for r in vector_results]
+                valid_ids = set(self.mongodb_store.filter_by_metadata(
+                    {"sentiment.classification": sentiment_filter}
+                ))
+                vector_results = [
+                    r for r in vector_results 
+                    if r["article_id"] in valid_ids
+                ][:top_k * 2]
+            
             routing.strategy_metadata = {
-                "strategy_used": "no_results",
+                "strategy_used": strategy_used,
                 "filtered_count": 0,
-                "vector_candidates": 0,
-                "mongodb_filter_applied": bool(mongodb_filter),
-                "threshold": self.max_filter_ids
+                "fallback_triggered": True,
+                "mongodb_filter_applied": False,
+                "vector_candidates": len(vector_results)
             }
-            return [], routing
         
         elif filtered_count <= self.max_filter_ids:
             # STRATEGY A: MongoDB Filter → Vector Search
