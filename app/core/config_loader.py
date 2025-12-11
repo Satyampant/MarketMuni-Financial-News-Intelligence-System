@@ -13,6 +13,7 @@ ROOT_DIR = Path(__file__).resolve().parent.parent.parent
 CONFIG_FILE = ROOT_DIR / "config.yaml"
 PROMPTS_FILE = ROOT_DIR / "prompts.yaml"
 
+
 @dataclass
 class EntityExtractionPrompts:
     system_message: str = ""
@@ -54,7 +55,7 @@ class PromptConfig:
 @dataclass
 class MongoDBConfig:
     """MongoDB configuration for article storage."""
-    connection_string: str = "mongodb://localhost:27017/"
+    connection_string: str = os.getenv("MONGODB_URL")   # "mongodb://localhost:27017/"
     database_name: str = "marketmuni"
     collection_name: str = "articles"
     max_pool_size: int = 100
@@ -236,7 +237,7 @@ def load_config(config_path: Optional[Path] = None) -> Config:
         if 'mongodb' in yaml_data:
             mongo = yaml_data['mongodb']
             config.mongodb = MongoDBConfig(
-                connection_string=mongo.get('connection_string', 'mongodb://localhost:27017/') if mongodb.connection_string else os.getenv("MONGODB_URL"),
+                connection_string=mongo.get('connection_string', os.getenv("MONGODB_URL")),
                 database_name=mongo.get('database_name', 'marketmuni'),
                 collection_name=mongo.get('collection_name', 'articles'),
                 max_pool_size=mongo.get('max_pool_size', 100),

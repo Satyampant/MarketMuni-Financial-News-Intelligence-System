@@ -116,7 +116,7 @@ class MongoDBStore:
     
     def insert_article(self, article: NewsArticle) -> str:
         """Insert or update article in MongoDB using upsert."""
-        if not self.is_connected or not self.collection:
+        if not self.is_connected or self.collection is None:
             raise ConnectionError("Not connected to MongoDB")
         
         mongo_doc = article.to_mongo_document()
@@ -131,7 +131,7 @@ class MongoDBStore:
     
     def bulk_insert_articles(self, articles: List[NewsArticle]) -> List[str]:
         """Batch insert or update multiple articles using bulk write operations."""
-        if not self.is_connected or not self.collection:
+        if not self.is_connected or self.collection is None:
             raise ConnectionError("Not connected to MongoDB")
         
         if not articles:
@@ -180,7 +180,7 @@ class MongoDBStore:
     
     def get_article_by_id(self, article_id: str) -> Optional[NewsArticle]:
         """Retrieve a single article by its business ID."""
-        if not self.is_connected or not self.collection:
+        if not self.is_connected or self.collection is None:
             raise ConnectionError("Not connected to MongoDB")
         
         try:
@@ -197,7 +197,7 @@ class MongoDBStore:
     
     def get_articles_by_ids(self, article_ids: List[str]) -> List[NewsArticle]:
         """Retrieve multiple articles by IDs, preserving order."""
-        if not self.is_connected or not self.collection:
+        if not self.is_connected or self.collection is None:
             raise ConnectionError("Not connected to MongoDB")
         
         if not article_ids:
@@ -225,7 +225,7 @@ class MongoDBStore:
     
     def get_all_articles(self) -> List[NewsArticle]:
         """Retrieve all articles from the collection."""
-        if not self.is_connected or not self.collection:
+        if not self.is_connected or self.collection is None:
             raise ConnectionError("Not connected to MongoDB")
         
         try:
@@ -244,7 +244,7 @@ class MongoDBStore:
     
     def get_articles_with_sentiment(self) -> List[NewsArticle]:
         """Retrieve all articles that have sentiment analysis data."""
-        if not self.is_connected or not self.collection:
+        if not self.is_connected or self.collection is None:
             raise ConnectionError("Not connected to MongoDB")
         
         try:
@@ -271,7 +271,7 @@ class MongoDBStore:
         limit: Optional[int] = None
     ) -> List[str]:
         """Filter articles by metadata and return matching article IDs sorted by recency."""
-        if not self.is_connected or not self.collection:
+        if not self.is_connected or self.collection is None:
             raise ConnectionError("Not connected to MongoDB")
         
         try:
@@ -319,7 +319,7 @@ class MongoDBStore:
     
     def count_articles(self, filters: Optional[Dict[str, Any]] = None) -> int:
         """Count articles matching the specified filters."""
-        if not self.is_connected or not self.collection:
+        if not self.is_connected or self.collection is None:
             raise ConnectionError("Not connected to MongoDB")
         
         try:
@@ -343,7 +343,7 @@ class MongoDBStore:
         Create indexes on frequently queried fields for optimal performance.
         Called automatically during initialization.
         """
-        if not self.is_connected or not self.collection:
+        if not self.is_connected or self.collection is None:
             logger.warning("Cannot create indexes - not connected to MongoDB")
             return
         
@@ -413,7 +413,7 @@ class MongoDBStore:
         Aggregate sentiment distribution across all articles using MongoDB aggregation pipeline.
         Returns statistics matching the format used by stats endpoint.
         """
-        if not self.is_connected or not self.collection:
+        if not self.is_connected or self.collection is None:
             raise ConnectionError("Not connected to MongoDB")
         
         try:
@@ -489,7 +489,7 @@ class MongoDBStore:
         Aggregate supply chain impact statistics across all articles.
         Returns cross-impact counts and distribution.
         """
-        if not self.is_connected or not self.collection:
+        if not self.is_connected or self.collection is None:
             raise ConnectionError("Not connected to MongoDB")
         
         try:

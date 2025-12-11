@@ -9,9 +9,8 @@ from sentence_transformers import CrossEncoder
 from app.core.models import NewsArticle
 from app.core.config_loader import get_config
 
-if TYPE_CHECKING:
-    from app.services.vector_store import VectorStore
-    from app.services.mongodb_store import MongoDBStore
+from app.services.vector_store import VectorStore
+from app.services.mongodb_store import MongoDBStore
 
 class DeduplicationAgent:
     """

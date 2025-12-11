@@ -4,7 +4,7 @@
 # MONGODB CONFIGURATION
 # ----------------------------------------------------------------------------
 mongodb:
-  connection_string: ""  #"mongodb://localhost:27017/"
+  connection_string: "mongodb+srv://satyampant420_db_user:password_123@newsstorage.ijz6nbi.mongodb.net/?appName=NewsStorage"  #"mongodb://localhost:27017/"
   database_name: "MarketMuni"
   collection_name: "NewsStorage"
   max_pool_size: 100
