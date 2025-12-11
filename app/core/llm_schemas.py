@@ -30,13 +30,13 @@ class RelationshipType(str, Enum):
 
 class QueryIntent(str, Enum):
     """Query routing strategy types."""
-    DIRECT_ENTITY = "direct_entity"
-    SECTOR_WIDE = "sector_wide"
-    REGULATORY = "regulatory"
-    SENTIMENT_DRIVEN = "sentiment_driven"
-    CROSS_IMPACT = "cross_impact"
-    SEMANTIC_SEARCH = "semantic_search"
-    TEMPORAL = "temporal"
+    DIRECT_ENTITY = "DIRECT_ENTITY"
+    SECTOR_WIDE = "SECTOR_WIDE"
+    REGULATORY = "REGULATORY"
+    SENTIMENT_DRIVEN = "SENTIMENT_DRIVEN"
+    CROSS_IMPACT = "CROSS_IMPACT"
+    SEMANTIC_SEARCH = "SEMANTIC_SEARCH"
+    TEMPORAL = "TEMPORAL"
 
 
 # ENTITY EXTRACTION SCHEMAS

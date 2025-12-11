@@ -237,7 +237,7 @@ def load_config(config_path: Optional[Path] = None) -> Config:
         if 'mongodb' in yaml_data:
             mongo = yaml_data['mongodb']
             config.mongodb = MongoDBConfig(
-                connection_string=mongo.get('connection_string', os.getenv("MONGODB_URL")),
+                connection_string=os.getenv(MONGODB_URL) if os.getenv("MONGODB_URL") else mongo.get('connection_string'),
                 database_name=mongo.get('database_name', 'marketmuni'),
                 collection_name=mongo.get('collection_name', 'articles'),
                 max_pool_size=mongo.get('max_pool_size', 100),

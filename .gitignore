@@ -9,3 +9,4 @@ chroma_db/
 test_chroma_sentiment/
 test_chroma_sentiment_search/
 tests/
+data/

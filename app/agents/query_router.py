@@ -35,11 +35,11 @@ class QueryRouter:
     
     def _build_few_shot_examples(self) -> str:
         """Get few-shot examples from config."""
-        return self.config.prompts.query_routing.get('few_shot_examples', '')
+        return self.config.prompts.query_routing.few_shot_examples
     
     def _build_routing_prompt(self, query: str) -> str:
         """Build the routing prompt with query."""
-        prompt_template = self.config.prompts.query_routing.get('task_prompt', '')
+        prompt_template = self.config.prompts.query_routing.task_prompt
         return prompt_template.format(query=query)
     
     def _validate_and_enrich(self, raw_result: QueryRouterSchema) -> QueryRouterSchema:
@@ -93,7 +93,7 @@ class QueryRouter:
             raise ValueError("Query cannot be empty")
         
         # Prepare system message with few-shot examples
-        system_message_template = self.config.prompts.query_routing.get('system_message', '')
+        system_message_template = self.config.prompts.query_routing.system_message
         few_shot_examples = self._build_few_shot_examples()
         system_message = system_message_template.format(few_shot_examples=few_shot_examples)
             
