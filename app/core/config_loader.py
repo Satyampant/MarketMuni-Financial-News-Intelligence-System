@@ -7,6 +7,8 @@ import yaml
 from pathlib import Path
 from typing import Any, Dict, Optional
 from dataclasses import dataclass, field
+from dotenv import load_dotenv
+load_dotenv()
 
 # Resolve project root relative to this file
 ROOT_DIR = Path(__file__).resolve().parent.parent.parent
@@ -237,7 +239,7 @@ def load_config(config_path: Optional[Path] = None) -> Config:
         if 'mongodb' in yaml_data:
             mongo = yaml_data['mongodb']
             config.mongodb = MongoDBConfig(
-                connection_string=os.getenv(MONGODB_URL) if os.getenv("MONGODB_URL") else mongo.get('connection_string'),
+                connection_string=os.getenv("MONGODB_URL") if os.getenv("MONGODB_URL") else mongo.get('connection_string'),
                 database_name=mongo.get('database_name', 'marketmuni'),
                 collection_name=mongo.get('collection_name', 'articles'),
                 max_pool_size=mongo.get('max_pool_size', 100),
